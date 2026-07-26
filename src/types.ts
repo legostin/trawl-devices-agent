@@ -46,6 +46,9 @@ export interface Device {
   video: boolean;
   /** Pause after each step, ms — makes a replay watchable. */
   stepDelayMs: number;
+  /** Frames per second when video is on. Playwright's own video cannot be
+   *  slowed down, so frames are captured instead. */
+  videoFps: number;
   /** Close the browser when a run ends. Off leaves it open for inspection. */
   closeAfterRun: boolean;
   /** What this device type supports: "record" | "run" | "live" | "traffic". */
@@ -94,6 +97,11 @@ export interface RunReport {
   startedAt: number;
   durationMs: number;
   steps: StepResult[];
-  artifacts: { trace: string | null; video: string | null };
+  artifacts: {
+    trace: string | null;
+    video: string | null;
+    /** Directory of JPEG frames plus how to play them back. */
+    frames?: { dir: string; count: number; fps: number };
+  };
   warnings: string[];
 }

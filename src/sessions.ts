@@ -61,7 +61,6 @@ export class SessionStore {
     }
 
     const contextOptions = contextOptionsFor(device, options.trawlProxyPort ?? 8080);
-    if (device.video && options.videoDir) contextOptions.recordVideo = { dir: options.videoDir };
 
     const context = await browser.newContext(contextOptions);
     const page = await context.newPage();

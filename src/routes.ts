@@ -8,6 +8,7 @@ import { AgentError } from "./types.js";
 import { RecorderStore } from "./recorder.js";
 import { performAction, snapshot, type ActionInput } from "./control.js";
 import { readGuide } from "./guide.js";
+import { listArtifacts, listRuns, readArtifact } from "./archive.js";
 
 export interface RouteDeps {
   workspace: string;
@@ -122,7 +123,31 @@ export function buildRoutes(deps: RouteDeps): Route[] {
         });
       },
     },
-    { method: "GET", path: "/runs", handler: async (_r, p) => ({ runs: runner.list(Number(p.limit ?? 20)) }) },
+    {
+      method: "GET",
+      path: "/runs",
+      handler: async (_r, p) => {
+        // Disk first (it outlives the process), then whatever is still running.
+        const archived = await listRuns(workspace, {
+          script: p.script,
+          limit: Number(p.limit ?? 50),
+        });
+        const live = runner
+          .list(50)
+          .filter((r) => r.status === "running" && (!p.script || r.script === p.script));
+        return { runs: [...live, ...archived.filter((a) => !live.some((l) => l.runId === a.runId))] };
+      },
+    },
+    {
+      method: "GET",
+      path: "/runs/:id/artifacts",
+      handler: async (_r, p) => ({ artifacts: await listArtifacts(workspace, p.id!) }),
+    },
+    {
+      method: "GET",
+      path: "/runs/:id/artifact",
+      handler: async (_r, p) => readArtifact(workspace, p.id!, p.path!),
+    },
     {
       method: "GET",
       path: "/runs/:id",

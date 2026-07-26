@@ -10,6 +10,7 @@ import { readScript, runDir } from "./workspace.js";
 import { TrafficBuffer, describeMatcher, parseMatcher, type MatcherObject } from "./traffic.js";
 import { interpolate } from "./interpolate.js";
 import { makeMasker } from "./mask.js";
+import { captureFrames, installCursor, type FrameCapture } from "./frames.js";
 
 export interface RunnerDeps {
   sessions: SessionStore;
@@ -110,6 +111,16 @@ export class Runner {
     const page = session.page;
     const traceOn = input.device.trace !== "off";
     if (traceOn) await session.context.tracing.start({ screenshots: true, snapshots: true });
+
+    // A recorded replay is only useful if you can see where the pointer went.
+    let frames: FrameCapture | null = null;
+    if (input.device.video) {
+      await installCursor(session.context).catch(() => {});
+      frames = await captureFrames(page, path.join(dir, "frames"), input.device.videoFps ?? 5).catch(
+        () => null,
+      );
+      if (!frames) report.warnings.push("frame capture failed to start");
+    }
 
     let timeout = DEFAULT_TIMEOUT;
     let baseUrl = "";
@@ -454,6 +465,10 @@ export class Runner {
       for (const observed of traffic.all()) {
         const step = report.steps[observed.step];
         if (step) step.flows.push({ method: observed.method, url: observed.url, status: observed.status });
+      }
+      if (frames) {
+        const { count, fps } = await frames.stop();
+        if (count > 0) report.artifacts.frames = { dir: "frames", count, fps };
       }
       if (traceOn) {
         const keep = input.device.trace === "always" || finalStatus !== "passed";

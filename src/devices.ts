@@ -14,6 +14,7 @@ export const DEVICE_DEFAULTS = {
   video: false,
   stepDelayMs: 0,
   closeAfterRun: true,
+  videoFps: 5,
   capabilities: ["record", "run", "live", "traffic"],
 } satisfies Omit<Device, "id" | "name">;
 
@@ -40,6 +41,9 @@ export function validateDevice(input: unknown): Device {
     fail("stepDelayMs must be between 0 and 60000");
   }
   if (typeof merged.closeAfterRun !== "boolean") fail("closeAfterRun must be a boolean");
+  if (typeof merged.videoFps !== "number" || merged.videoFps < 1 || merged.videoFps > 30) {
+    fail("videoFps must be between 1 and 30");
+  }
   merged.type = "browser";
   return merged;
 }
