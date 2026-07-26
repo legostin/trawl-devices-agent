@@ -42,6 +42,7 @@ click({ role: 'row', name: 'Заказ 42', within: { testId: 'orders' } })
   `expectUrl`, `expectCount`, `expectAttr`
 - HTTP assertions: `expectRequest`, `expectResponse`, `expectNoRequest`
 - Reads: `getText`, `getValue`, `getAttr`, `getUrl`, `count`
+- Composition: `run('scripts/login.js')`, `run('scripts/login.js', { USER: 'someone@example.com' })`
 - Misc: `step(name, fn)`, `screenshot(name)`, `note(text)`
 
 ## Rules
@@ -49,7 +50,8 @@ click({ role: 'row', name: 'Заказ 42', within: { testId: 'orders' } })
 1. **No `await`.** The runner inserts it. Reads return real values:
    `const title = getText({ css: 'h1' })`.
 2. **`{{VAR}}`** comes from the Trawl project env; an unknown name fails the run.
-   **`secret('NAME')`** reads the Keychain — never paste a literal password.
+   `env.VAR` reads the same values in code. **`secret('NAME')`** reads the
+   Keychain — never paste a literal password.
 3. **Prefer assertions over `sleep`.** Every step already auto-waits.
 4. **Group with `step('name', () => { … })`** — the report shows the group name.
 5. **HTTP matchers are a method plus a URL substring** (`'POST /api/login'`), or
@@ -57,3 +59,13 @@ click({ role: 'row', name: 'Заказ 42', within: { testId: 'orders' } })
    first matching response not yet consumed, waiting up to the timeout.
 6. **A failing step ends the run.** Steps after it never execute, so they do not
    appear in the report.
+7. **Compose instead of repeating.** Record login once and call it:
+
+```js
+run('scripts/login.js')
+click({ role: 'link', name: 'Search' })
+```
+
+   The called script runs in the same browser, its steps appear in the report
+   under its path, and a second argument overlays variables for that call only
+   (`run('scripts/login.js', { USER: '{{ADMIN}}' })`). Cycles are refused.

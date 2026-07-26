@@ -16,6 +16,8 @@ export const STEP_NAMES = [
   "expectRequest", "expectResponse", "expectNoRequest",
   // reads
   "getText", "getValue", "getAttr", "getUrl", "count",
+  // composition
+  "run",
   // misc
   "step", "screenshot", "note",
 ] as const;

@@ -6,7 +6,7 @@ import { AgentError, type Device, type RunReport, type StepResult, type TargetSp
 import { runInSandbox } from "./sandbox.js";
 import { describeTarget, isRegExp, toLocator, toMatcher } from "./targets.js";
 import { SessionStore } from "./sessions.js";
-import { runDir } from "./workspace.js";
+import { readScript, runDir } from "./workspace.js";
 import { TrafficBuffer, describeMatcher, parseMatcher, type MatcherObject } from "./traffic.js";
 import { interpolate } from "./interpolate.js";
 import { makeMasker } from "./mask.js";
@@ -40,6 +40,7 @@ interface RunState {
 
 const DEFAULT_TIMEOUT = 15_000;
 const MAX_SCRIPT_MS = 10 * 60_000;
+const MAX_RUN_DEPTH = 10;
 
 export class Runner {
   private readonly runs = new Map<string, RunState>();
@@ -113,6 +114,10 @@ export class Runner {
     let timeout = DEFAULT_TIMEOUT;
     let baseUrl = "";
     const stepDelayMs = Math.max(0, input.stepDelayMs ?? input.device.stepDelayMs ?? 0);
+    // Composition can overlay variables for the script it calls, so the set in
+    // force is per-frame rather than fixed for the whole run.
+    let currentEnv: Record<string, string> = { ...input.env };
+    const scriptStack: string[] = input.scriptPath ? [input.scriptPath] : [];
     const closeAfterRun = input.closeAfterRun ?? input.device.closeAfterRun ?? true;
     let current: StepResult | null = null;
     let currentName: string | undefined;
@@ -150,7 +155,7 @@ export class Runner {
     const tracked =
       <A extends unknown[], R>(action: string, body: (...args: A) => Promise<R>) =>
       async (...rawArgs: A): Promise<R> => {
-        const args = rawArgs.map((a) => interpolate(a, input.env)) as A;
+        const args = rawArgs.map((a) => interpolate(a, currentEnv)) as A;
         const step = beginStep(action, args);
         try {
           const result = await body(...args);
@@ -191,7 +196,15 @@ export class Runner {
     };
 
     const scope: Record<string, unknown> = {
-      env: input.env,
+      env: new Proxy(
+        {},
+        {
+          get: (_t, key: string) => currentEnv[key],
+          has: (_t, key: string) => key in currentEnv,
+          ownKeys: () => Object.keys(currentEnv),
+          getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
+        },
+      ),
       secret: (name: string): string => {
         const value = input.secrets[name];
         if (value === undefined) throw new AgentError("script", `secret not provided: ${name}`);
@@ -368,6 +381,36 @@ export class Runner {
         await page.screenshot({ path: path.join(dir, file) });
       }),
       note: tracked("note", async () => {}),
+
+      /** Compose scenarios: record login once, then call it from the rest. */
+      run: async (relPath: string, overlay?: Record<string, string>): Promise<void> => {
+        const step = beginStep("run", overlay ? [relPath, overlay] : [relPath]);
+        endStep(step);
+
+        if (scriptStack.includes(relPath)) {
+          throw new AgentError("script", `run cycle: ${[...scriptStack, relPath].join(" → ")}`);
+        }
+        if (scriptStack.length >= MAX_RUN_DEPTH) {
+          throw new AgentError("script", `run nested deeper than ${MAX_RUN_DEPTH}`);
+        }
+
+        const code = await readScript(this.deps.workspace, relPath).catch(() => {
+          throw new AgentError("script", `no such script: ${relPath}`);
+        });
+
+        const previousEnv = currentEnv;
+        const previousName = currentName;
+        currentEnv = overlay ? { ...currentEnv, ...overlay } : currentEnv;
+        currentName = relPath;
+        scriptStack.push(relPath);
+        try {
+          await runInSandbox(code, scope, MAX_SCRIPT_MS);
+        } finally {
+          scriptStack.pop();
+          currentEnv = previousEnv;
+          currentName = previousName;
+        }
+      },
       step: async (name: string, fn?: () => Promise<void>): Promise<void> => {
         const step = beginStep("step", [name]);
         endStep(step);
