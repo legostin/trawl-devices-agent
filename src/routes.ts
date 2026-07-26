@@ -5,6 +5,9 @@ import { getDevice, loadDevices, saveDevice } from "./devices.js";
 import { listScripts, readScript, writeScript } from "./workspace.js";
 import { collect } from "./sandbox.js";
 import { AgentError } from "./types.js";
+import { RecorderStore } from "./recorder.js";
+import { performAction, snapshot, type ActionInput } from "./control.js";
+import { readGuide } from "./guide.js";
 
 export interface RouteDeps {
   workspace: string;
@@ -18,6 +21,7 @@ export function buildRoutes(deps: RouteDeps): Route[] {
   const sessions = deps.sessions ?? new SessionStore();
   const trawlProxyPort = deps.trawlProxyPort ?? 8080;
   const runner = deps.runner ?? new Runner({ sessions, workspace, trawlProxyPort });
+  const recorder = new RecorderStore({ sessions, workspace });
 
   const body = <T>(value: unknown): T => {
     if (!value || typeof value !== "object") throw new AgentError("script", "a JSON body is required");
@@ -117,5 +121,42 @@ export function buildRoutes(deps: RouteDeps): Route[] {
       },
     },
     { method: "DELETE", path: "/runs/:id", handler: async (_r, p) => ({ cancelled: runner.cancel(p.id!) }) },
+
+    {
+      method: "POST",
+      path: "/record/start",
+      handler: async (_r, _p, b) => {
+        const { sessionId, deviceId, url } = body<{ sessionId?: string; deviceId?: string; url?: string }>(b);
+        if (!sessionId && !deviceId) throw new AgentError("script", "deviceId or sessionId is required");
+        const id =
+          sessionId ?? (await sessions.start(await getDevice(workspace, deviceId!), { trawlProxyPort })).sessionId;
+        return recorder.start(id, url);
+      },
+    },
+    { method: "GET", path: "/record/:id", handler: async (_r, p) => recorder.get(p.id!) },
+    {
+      method: "POST",
+      path: "/record/:id/stop",
+      handler: async (_r, p, b) => recorder.stop(p.id!, (b ?? {}) as { saveAs?: string; withTraffic?: boolean }),
+    },
+
+    {
+      method: "POST",
+      path: "/control/snapshot",
+      handler: async (_r, _p, b) => {
+        const { sessionId } = body<{ sessionId: string }>(b);
+        return { nodes: await snapshot(sessions.get(sessionId).page) };
+      },
+    },
+    {
+      method: "POST",
+      path: "/control/do",
+      handler: async (_r, _p, b) => {
+        const { sessionId, ...action } = body<{ sessionId: string } & ActionInput>(b);
+        return performAction(sessions.get(sessionId).page, action);
+      },
+    },
+
+    { method: "GET", path: "/guide", handler: async () => ({ guide: await readGuide() }) },
   ];
 }
