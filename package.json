@@ -1,0 +1,31 @@
+{
+  "name": "trawl-devices-agent",
+  "version": "0.1.0",
+  "description": "Local sidecar for the Trawl devices plugin — records and replays browser scenarios with Playwright.",
+  "type": "module",
+  "bin": {
+    "trawl-devices-agent": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "skills"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "acorn": "^8.17.0",
+    "acorn-walk": "^8.3.5",
+    "playwright": "^1.62.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
