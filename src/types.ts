@@ -44,6 +44,10 @@ export interface Device {
   ignoreHTTPSErrors: boolean;
   trace: "off" | "on-failure" | "always";
   video: boolean;
+  /** Pause after each step, ms — makes a replay watchable. */
+  stepDelayMs: number;
+  /** Close the browser when a run ends. Off leaves it open for inspection. */
+  closeAfterRun: boolean;
   /** What this device type supports: "record" | "run" | "live" | "traffic". */
   capabilities: string[];
 }
@@ -82,6 +86,8 @@ export interface StepResult extends StepRecord {
 
 export interface RunReport {
   runId: string;
+  /** Set when the browser was left open after the run. */
+  sessionId?: string;
   script: string | null;
   device: string;
   status: "running" | "passed" | "failed" | "error";

@@ -12,6 +12,8 @@ export const DEVICE_DEFAULTS = {
   ignoreHTTPSErrors: true,
   trace: "on-failure",
   video: false,
+  stepDelayMs: 0,
+  closeAfterRun: true,
   capabilities: ["record", "run", "live", "traffic"],
 } satisfies Omit<Device, "id" | "name">;
 
@@ -34,6 +36,10 @@ export function validateDevice(input: unknown): Device {
   if (!TRACES.includes(merged.trace)) fail(`trace must be one of ${TRACES.join(", ")}`);
   if (!PROXY_MODES.includes(merged.proxy?.mode)) fail(`proxy.mode must be one of ${PROXY_MODES.join(", ")}`);
   if (merged.proxy.mode === "custom" && !merged.proxy.url) fail("proxy.url is required when proxy.mode is custom");
+  if (typeof merged.stepDelayMs !== "number" || merged.stepDelayMs < 0 || merged.stepDelayMs > 60_000) {
+    fail("stepDelayMs must be between 0 and 60000");
+  }
+  if (typeof merged.closeAfterRun !== "boolean") fail("closeAfterRun must be a boolean");
   merged.type = "browser";
   return merged;
 }

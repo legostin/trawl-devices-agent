@@ -47,17 +47,20 @@ export const RECORDER_SOURCE = String.raw`
     return null;
   };
 
+  // Playwright collapses whitespace when it computes an accessible name; a raw
+  // textContent (icons, newlines, double spaces) would never match it.
+  const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
+
   const accessibleName = (el) => {
-    const aria = el.getAttribute('aria-label');
-    if (aria) return aria.trim();
-    if (el.labels && el.labels[0]) return el.labels[0].textContent.trim();
-    const text = (el.textContent || '').trim();
+    const aria = norm(el.getAttribute('aria-label'));
+    if (aria) return aria;
+    if (el.labels && el.labels[0]) return norm(el.labels[0].textContent);
+    const text = norm(el.textContent);
     if (text && text.length <= 60) return text;
-    const value = el.getAttribute('value');
-    return value ? value.trim() : '';
+    return norm(el.getAttribute('value'));
   };
 
-  const labelText = (el) => (el.labels && el.labels[0] ? el.labels[0].textContent.trim() : '');
+  const labelText = (el) => (el.labels && el.labels[0] ? norm(el.labels[0].textContent) : '');
 
   /** Ordered candidate targets, best first. */
   const candidates = (el) => {
@@ -71,7 +74,7 @@ export const RECORDER_SOURCE = String.raw`
     if (label) out.push({ label: label });
     const placeholder = el.getAttribute('placeholder');
     if (placeholder) out.push({ placeholder: placeholder });
-    const own = (el.textContent || '').trim();
+    const own = norm(el.textContent);
     if (own && own.length <= 40) out.push({ text: own });
     out.push({ css: cssPath(el) });
     return out;

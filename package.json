@@ -1,6 +1,6 @@
 {
   "name": "trawl-devices-agent",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Local sidecar for the Trawl devices plugin \u2014 records and replays browser scenarios with Playwright.",
   "type": "module",
   "bin": {

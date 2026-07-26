@@ -13,7 +13,17 @@ export interface Recording {
   steps: StepRecord[];
   warnings: string[];
   startedAt: number;
+  /** When the last step landed — used to tell a typed address from the
+   *  navigation an already-recorded click caused. */
+  lastStepAt: number;
+  lastUrl: string | null;
 }
+
+/** A navigation this soon after a recorded action is that action's consequence. */
+const NAVIGATION_GRACE_MS = 1500;
+
+const isRecordableUrl = (url: string): boolean =>
+  Boolean(url) && url !== "about:blank" && !url.startsWith("chrome-error://") && !url.startsWith("devtools://");
 
 export interface StopOptions {
   saveAs?: string;
@@ -32,6 +42,9 @@ interface RawEvent {
 }
 
 const MARK = "data-trawl-rec-el";
+
+/** Past this, a candidate is too vague to pin down by index. */
+const MAX_AMBIGUOUS_MATCHES = 30;
 
 export class RecorderStore {
   private readonly recordings = new Map<string, Recording>();
@@ -52,6 +65,8 @@ export class RecorderStore {
       steps: [],
       warnings: [],
       startedAt: Date.now(),
+      lastStepAt: 0,
+      lastUrl: null,
     };
 
     await session.context.exposeBinding("__trawlRec", async ({ page }, raw: RawEvent) => {
@@ -62,11 +77,26 @@ export class RecorderStore {
           action: raw.action,
           args: [target, ...raw.args],
         });
+        recording.lastStepAt = Date.now();
       } catch (err) {
         recording.warnings.push(`dropped ${raw.action}: ${(err as Error).message}`);
       }
     });
     await session.context.addInitScript(RECORDER_SOURCE);
+
+    // Addresses the human opens are steps too: without them a replay has no
+    // idea where to start.
+    session.page.on("framenavigated", (frame) => {
+      if (frame !== session.page.mainFrame()) return;
+      const url = frame.url();
+      if (!isRecordableUrl(url) || url === recording.lastUrl) return;
+      recording.lastUrl = url;
+      // A click we already recorded is what caused this navigation — recording
+      // a goto as well would replay the click and then jump past its result.
+      if (Date.now() - recording.lastStepAt < NAVIGATION_GRACE_MS) return;
+      recording.steps.push({ index: recording.steps.length, action: "goto", args: [url] });
+      recording.lastStepAt = Date.now();
+    });
 
     this.deps.sessions.setState(sessionId, "recording");
     if (url) await session.page.goto(url);
@@ -84,12 +114,19 @@ export class RecorderStore {
     for (const candidate of candidates) {
       try {
         const locator = toLocator(page, candidate);
-        if ((await locator.count()) !== 1) continue;
-        const handle = (await locator.elementHandle({ timeout: 1000 })) as ElementHandle | null;
-        if (!handle) continue;
-        const isMarked = await handle.evaluate((el, mark) => (el as Element).hasAttribute(mark), MARK);
-        await handle.dispose();
-        if (isMarked) return candidate;
+        const count = await locator.count();
+        if (count === 0) continue;
+        if (count === 1) {
+          if (await this.isMarked(locator)) return candidate;
+          continue;
+        }
+        // Ambiguous on its own, but still usable: pin it to the element that was
+        // actually clicked. Recording it bare would fail the replay with a
+        // strict-mode violation the moment the page has siblings like it.
+        if (count > MAX_AMBIGUOUS_MATCHES) continue;
+        for (let i = 0; i < count; i++) {
+          if (await this.isMarked(locator.nth(i))) return { ...candidate, nth: i };
+        }
       } catch {
         // try the next candidate
       }
@@ -98,6 +135,16 @@ export class RecorderStore {
     if (!fallback) throw new AgentError("script", "no candidate target");
     recording.warnings.push(`no verified target; fell back to ${JSON.stringify(fallback)}`);
     return fallback;
+  }
+
+  private async isMarked(locator: ReturnType<typeof toLocator>): Promise<boolean> {
+    const handle = (await locator.elementHandle({ timeout: 1000 })) as ElementHandle | null;
+    if (!handle) return false;
+    try {
+      return await handle.evaluate((el, mark) => (el as Element).hasAttribute(mark), MARK);
+    } finally {
+      await handle.dispose();
+    }
   }
 
   async stop(

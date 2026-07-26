@@ -78,3 +78,75 @@ it("round-trips: recorded clicks replay green", async () => {
   expect(report.steps.find((s) => s.status === "failed")?.error).toBeUndefined();
   expect(report.status).toBe("passed");
 });
+
+it("records addresses the human opens, but not navigation caused by a recorded click", async () => {
+  const session = await sessions.start(device, { headless: true });
+  const recording = await recorder.start(session.sessionId);
+  const page = sessions.get(session.sessionId).page;
+
+  // Typed into the address bar: nothing preceded it, so it is a step.
+  const index = fixture.replace("form.html", "index.html");
+  await page.goto(index);
+  await page.waitForTimeout(200);
+
+  // Clicking the link is recorded; the navigation it causes must not add a goto.
+  await page.getByRole("link", { name: "Open the form" }).click();
+  await page.waitForTimeout(600);
+
+  const result = await recorder.stop(recording.id, {});
+  const actions = result.steps.map((s) => s.action);
+
+  expect(actions[0]).toBe("goto");
+  expect(result.steps[0]!.args[0]).toBe(index);
+  expect(actions).toContain("click");
+  expect(actions.filter((a) => a === "goto")).toHaveLength(1);
+});
+
+it("a recording that starts from a typed address replays on its own", async () => {
+  const session = await sessions.start(device, { headless: true });
+  const recording = await recorder.start(session.sessionId);
+  const page = sessions.get(session.sessionId).page;
+
+  await page.goto(fixture);
+  await page.waitForTimeout(200);
+  await page.getByLabel("Email").fill("user@example.com");
+  await page.getByTestId("submit").click();
+  await page.waitForTimeout(300);
+  const result = await recorder.stop(recording.id, {});
+
+  // No hand-written goto prefix this time — the script must carry its own.
+  const runner = new Runner({ sessions, workspace: root, trawlProxyPort: 8080 });
+  const started = await runner.start({ code: result.code, device, env: {}, secrets: {} });
+  let report: RunReport = runner.get(started.runId)!;
+  for (let i = 0; i < 300 && report.status === "running"; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    report = runner.get(started.runId)!;
+  }
+  expect(report.steps[0]!.action).toBe("goto");
+  expect(report.status).toBe("passed");
+});
+
+it("never records a target that would hit several elements on replay", async () => {
+  const session = await sessions.start(device, { headless: true });
+  const list = fixture.replace("form.html", "list.html");
+  const recording = await recorder.start(session.sessionId, list);
+  const page = sessions.get(session.sessionId).page;
+
+  // The link whose text carries newlines and double spaces — the case that made
+  // the accessible name miss and dropped the recorder onto a css path matching
+  // every link on the page.
+  await page.getByRole("link", { name: "Вход и регистрация" }).click();
+  await page.waitForTimeout(300);
+  const result = await recorder.stop(recording.id, {});
+
+  const click = result.steps.find((s) => s.action === "click")!;
+  const target = click.args[0] as Record<string, unknown>;
+
+  // Whatever the recorder chose, it must resolve to exactly one element.
+  const check = await sessions.start(device, { headless: true });
+  const probe = sessions.get(check.sessionId).page;
+  await probe.goto(list);
+  const { toLocator } = await import("./targets.js");
+  expect(await toLocator(probe, target).count()).toBe(1);
+  expect(target.name ?? "").not.toContain("\n");
+});

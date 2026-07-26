@@ -103,6 +103,8 @@ export function buildRoutes(deps: RouteDeps): Route[] {
           secrets?: Record<string, string>;
           headless?: boolean;
           proxyPort?: number;
+          stepDelayMs?: number;
+          closeAfterRun?: boolean;
         }>(b);
         const code = input.code ?? (await readScript(workspace, input.path!));
         const device = await getDevice(workspace, input.deviceId);
@@ -115,6 +117,8 @@ export function buildRoutes(deps: RouteDeps): Route[] {
           secrets: input.secrets ?? {},
           headless: input.headless,
           trawlProxyPort: input.proxyPort,
+          stepDelayMs: input.stepDelayMs,
+          closeAfterRun: input.closeAfterRun,
         });
       },
     },

@@ -28,6 +28,9 @@ export interface StartRunInput {
   headless?: boolean;
   /** Overrides the port configured at startup — the plugin knows the live one. */
   trawlProxyPort?: number;
+  /** Per-run overrides of the device's own settings. */
+  stepDelayMs?: number;
+  closeAfterRun?: boolean;
 }
 
 interface RunState {
@@ -109,6 +112,8 @@ export class Runner {
 
     let timeout = DEFAULT_TIMEOUT;
     let baseUrl = "";
+    const stepDelayMs = Math.max(0, input.stepDelayMs ?? input.device.stepDelayMs ?? 0);
+    const closeAfterRun = input.closeAfterRun ?? input.device.closeAfterRun ?? true;
     let current: StepResult | null = null;
     let currentName: string | undefined;
 
@@ -150,6 +155,9 @@ export class Runner {
         try {
           const result = await body(...args);
           endStep(step);
+          // A deliberate pause makes the replay watchable; it is not a wait —
+          // every step already auto-waits for its target.
+          if (stepDelayMs) await page.waitForTimeout(stepDelayMs);
           return result;
         } catch (err) {
           const agentErr =
@@ -411,8 +419,12 @@ export class Runner {
         if (keep) report.artifacts.trace = "trace.zip";
       }
       report.durationMs = Date.now() - report.startedAt;
-      if (ownSession) await this.deps.sessions.stop(session.sessionId);
-      else this.deps.sessions.setState(session.sessionId, "idle");
+      if (ownSession && closeAfterRun) {
+        await this.deps.sessions.stop(session.sessionId);
+      } else {
+        this.deps.sessions.setState(session.sessionId, "idle");
+        report.sessionId = session.sessionId; // the window is still on screen
+      }
 
       const mask = makeMasker(input.secrets);
       const finished = mask({ ...report, status: finalStatus }) as RunReport;
