@@ -4,9 +4,20 @@ import { AgentError, type RegexSpec, type TargetSpec } from "./types.js";
 export const isRegexSpec = (v: unknown): v is RegexSpec =>
   typeof v === "object" && v !== null && "__regex" in v;
 
-/** A script may pass a RegExp; JSON transport passes {__regex:{source,flags}}. */
+/**
+ * `instanceof RegExp` lies across realms, and scripts run inside `node:vm` —
+ * their regexes come from a different realm than ours.
+ */
+export const isRegExp = (v: unknown): v is RegExp => Object.prototype.toString.call(v) === "[object RegExp]";
+
+/**
+ * A script may pass a RegExp; JSON transport passes {__regex:{source,flags}}.
+ * Foreign-realm regexes are rebuilt here so Playwright's own `instanceof`
+ * checks recognise them.
+ */
 export function toMatcher(value: string | RegExp | RegexSpec): string | RegExp {
   if (isRegexSpec(value)) return new RegExp(value.__regex.source, value.__regex.flags);
+  if (isRegExp(value) && !(value instanceof RegExp)) return new RegExp(value.source, value.flags);
   return value;
 }
 
@@ -30,7 +41,7 @@ export function toLocator(scope: Page | Locator, target: TargetSpec): Locator {
 }
 
 const show = (v: unknown): string =>
-  isRegexSpec(v) ? `/${v.__regex.source}/${v.__regex.flags}` : v instanceof RegExp ? String(v) : JSON.stringify(v);
+  isRegexSpec(v) ? `/${v.__regex.source}/${v.__regex.flags}` : isRegExp(v) ? String(v) : JSON.stringify(v);
 
 /** Human-readable target, used in assertion and timeout messages. */
 export function describeTarget(target: TargetSpec): string {
