@@ -32,6 +32,8 @@ export interface StartRunInput {
   /** Per-run overrides of the device's own settings. */
   stepDelayMs?: number;
   closeAfterRun?: boolean;
+  /** Marks this run's traffic so Trawl rules can scope themselves to it. */
+  runTag?: string;
 }
 
 interface RunState {
@@ -139,6 +141,7 @@ export class Runner {
       report.runId,
       () => (current ? current.index : report.steps.length),
       traffic,
+      input.runTag,
     );
 
     const beginStep = (action: string, args: unknown[]): StepResult => {
@@ -392,6 +395,11 @@ export class Runner {
         await page.screenshot({ path: path.join(dir, file) });
       }),
       note: tracked("note", async () => {}),
+
+      // Mocks are applied by Trawl's proxy — the rules were created before this
+      // run started. Recording the step keeps the report honest about intent.
+      mock: tracked("mock", async () => {}),
+      unmock: tracked("unmock", async () => {}),
 
       /** Compose scenarios: record login once, then call it from the rest. */
       run: async (relPath: string, overlay?: Record<string, string>): Promise<void> => {

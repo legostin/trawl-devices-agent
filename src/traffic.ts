@@ -119,6 +119,8 @@ export class TrafficBuffer {
     runId: string,
     getStep: () => number,
     buffer: TrafficBuffer,
+    /** Scopes Trawl rules to this run; correlation keeps using runId. */
+    runTag?: string,
   ): Promise<() => Promise<void>> {
     // The step is fixed when the request goes out, not when the response comes
     // back — otherwise attribution would disagree with the marker header the
@@ -130,7 +132,12 @@ export class TrafficBuffer {
       stepOfRequest.set(route.request(), step);
       await route
         .continue({
-          headers: { ...route.request().headers(), "x-trawl-run": runId, "x-trawl-step": String(step) },
+          headers: {
+            ...route.request().headers(),
+            "x-trawl-run": runId,
+            "x-trawl-step": String(step),
+            ...(runTag ? { "x-trawl-tag": runTag } : {}),
+          },
         })
         .catch(() => {});
     });

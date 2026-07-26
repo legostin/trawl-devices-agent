@@ -18,6 +18,8 @@ export const STEP_NAMES = [
   "getText", "getValue", "getAttr", "getUrl", "count",
   // composition
   "run",
+  // mocking (applied by Trawl's proxy, not here)
+  "mock", "unmock",
   // misc
   "step", "screenshot", "note",
 ] as const;

@@ -48,6 +48,9 @@ the recording says so in its warnings.
 - HTTP assertions: `expectRequest`, `expectResponse`, `expectNoRequest`
 - Reads: `getText`, `getValue`, `getAttr`, `getUrl`, `count`
 - Composition: `run('scripts/login.js')`, `run('scripts/login.js', { USER: 'someone@example.com' })`
+- Mocks (applied by Trawl's proxy): `mock('GET api/orders', { status: 500 })`,
+  `mock('GET api/orders', { json: { items: [] } })`,
+  `mock('POST api/login', { status: 429, delayMs: 2000 })`, `unmock('GET api/orders')`
 - Misc: `step(name, fn)`, `screenshot(name)`, `note(text)`
 
 ## Rules
@@ -64,7 +67,11 @@ the recording says so in its warnings.
    first matching response not yet consumed, waiting up to the timeout.
 6. **A failing step ends the run.** Steps after it never execute, so they do not
    appear in the report.
-7. **Compose instead of repeating.** Record login once and call it:
+7. **Mocks are Trawl rules**, created for the run and deleted after it. They only
+   apply to hosts inside the active project's scope, and the faked exchange shows
+   up in the traffic list like any other flow. A mock that never fired is
+   reported as a warning rather than passing quietly.
+8. **Compose instead of repeating.** Record login once and call it:
 
 ```js
 run('scripts/login.js')

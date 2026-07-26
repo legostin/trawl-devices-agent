@@ -106,6 +106,7 @@ export function buildRoutes(deps: RouteDeps): Route[] {
           proxyPort?: number;
           stepDelayMs?: number;
           closeAfterRun?: boolean;
+          runTag?: string;
         }>(b);
         const code = input.code ?? (await readScript(workspace, input.path!));
         const device = await getDevice(workspace, input.deviceId);
@@ -120,6 +121,7 @@ export function buildRoutes(deps: RouteDeps): Route[] {
           trawlProxyPort: input.proxyPort,
           stepDelayMs: input.stepDelayMs,
           closeAfterRun: input.closeAfterRun,
+          runTag: input.runTag,
         });
       },
     },
