@@ -10,6 +10,7 @@ import { performAction, snapshot, type ActionInput } from "./control.js";
 import { readGuide } from "./guide.js";
 import { listArtifacts, listRuns, readArtifact } from "./archive.js";
 import { heal } from "./heal.js";
+import { listSuites, readSuite, writeSuite, SuiteRunner, type SuiteFile } from "./suites.js";
 
 export interface RouteDeps {
   workspace: string;
@@ -24,6 +25,7 @@ export function buildRoutes(deps: RouteDeps): Route[] {
   const trawlProxyPort = deps.trawlProxyPort ?? 8080;
   const runner = deps.runner ?? new Runner({ sessions, workspace, trawlProxyPort });
   const recorder = new RecorderStore({ sessions, workspace });
+  const suites = new SuiteRunner(runner, workspace);
 
   const body = <T>(value: unknown): T => {
     if (!value || typeof value !== "object") throw new AgentError("script", "a JSON body is required");
@@ -205,6 +207,67 @@ export function buildRoutes(deps: RouteDeps): Route[] {
       handler: async (_r, _p, b) => {
         const { sessionId, ...action } = body<{ sessionId: string } & ActionInput>(b);
         return performAction(sessions.get(sessionId).page, action);
+      },
+    },
+
+    { method: "GET", path: "/suites", handler: async () => ({ suites: await listSuites(workspace) }) },
+    {
+      method: "GET",
+      path: "/suites/read",
+      handler: async (_r, p) => readSuite(workspace, p.path!),
+    },
+    {
+      method: "POST",
+      path: "/suites/write",
+      handler: async (_r, _p, b) => {
+        const { path: rel, suite } = body<{ path: string; suite: SuiteFile }>(b);
+        await writeSuite(workspace, rel, suite);
+        return { path: rel, scripts: suite.scripts.length };
+      },
+    },
+    {
+      method: "POST",
+      path: "/suites/run",
+      handler: async (_r, _p, b) => {
+        const input = body<{
+          path?: string;
+          scenarios?: { path: string; tag?: string }[];
+          deviceId: string;
+          retries?: number;
+          env?: Record<string, string>;
+          secrets?: Record<string, string>;
+          proxyPort?: number;
+          stepDelayMs?: number;
+        }>(b);
+
+        const file = input.path ? await readSuite(workspace, input.path) : null;
+        const scenarios = input.scenarios ?? (file?.scripts ?? []).map((path) => ({ path }));
+        if (scenarios.length === 0) throw new AgentError("script", "the suite has no scenarios");
+
+        return suites.start({
+          scenarios,
+          device: await getDevice(workspace, input.deviceId),
+          env: input.env ?? {},
+          secrets: input.secrets ?? {},
+          retries: input.retries ?? file?.retries ?? 0,
+          proxyPort: input.proxyPort,
+          stepDelayMs: input.stepDelayMs,
+          suiteName: file?.name ?? input.path ?? "scenarios",
+        });
+      },
+    },
+    {
+      method: "GET",
+      path: "/suites/runs",
+      handler: async (_r, p) => ({ suites: suites.list(Number(p.limit ?? 20)) }),
+    },
+    {
+      method: "GET",
+      path: "/suites/runs/:id",
+      handler: async (_r, p) => {
+        const found = suites.get(p.id!);
+        if (!found) throw new AgentError("agent", `unknown suite run: ${p.id}`);
+        return found;
       },
     },
 

@@ -28,7 +28,8 @@ by hand is the fallback.
 <workspace>/
   devices.json     # device registry, commit it
   scripts/*.js     # scenarios, commit them
-  runs/<runId>/    # report.json, trace.zip, *.png — gitignore this
+  suites/*.json    # named lists of scenarios, commit them
+  runs/<runId>/    # report.json, trace.zip, frames/*.jpg — gitignore this
 ```
 
 ## Writing scripts
@@ -62,5 +63,7 @@ Playwright traces cannot be masked, so a device that uses `secret()` should keep
 | GET/POST | `/scripts…` | list, read, write, validate scripts |
 | POST/GET/DELETE | `/runs…` | start, poll, cancel runs |
 | POST/GET | `/record…` | start, inspect, stop a recording |
+| GET/POST | `/suites…` | list, read, write suites; run one and poll it |
+| POST | `/heal` | replay a failed run to its failing step and report the page |
 | POST | `/control/snapshot`, `/control/do` | live browser control |
 | GET | `/guide` | the DSL reference |
