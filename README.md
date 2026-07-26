@@ -14,8 +14,13 @@ The token also lives in `~/.trawl-devices/agent.json` (mode 0600).
 
 Install a browser once: `npx playwright install chromium`.
 
-Flags: `--workspace` (default: cwd), `--port` (8787, next free port if taken),
-`--proxy-port` (8080, Trawl's proxy), `--keep-runs` (50).
+Flags: `--workspace` (default: `~/trawl-devices`), `--port` (8787, next free port
+if taken), `--proxy-port` (8080, Trawl's proxy), `--keep-runs` (50),
+`--ensure-browser` (install the Playwright browser first — a no-op once it is
+there), `--browser` (chromium by default).
+
+Trawl 1.8.0 and newer starts the agent for you from the Devices tab; running it
+by hand is the fallback.
 
 ## Workspace layout
 
