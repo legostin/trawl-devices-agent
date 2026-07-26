@@ -26,6 +26,8 @@ export interface StartRunInput {
   env: Record<string, string>;
   secrets: Record<string, string>;
   headless?: boolean;
+  /** Overrides the port configured at startup — the plugin knows the live one. */
+  trawlProxyPort?: number;
 }
 
 interface RunState {
@@ -93,7 +95,7 @@ export class Runner {
       : this.deps.sessions.get(
           (
             await this.deps.sessions.start(input.device, {
-              trawlProxyPort: this.deps.trawlProxyPort,
+              trawlProxyPort: input.trawlProxyPort ?? this.deps.trawlProxyPort,
               headless: input.headless ?? input.device.headless,
               videoDir: input.device.video ? dir : undefined,
             })

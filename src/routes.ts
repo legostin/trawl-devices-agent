@@ -40,9 +40,15 @@ export function buildRoutes(deps: RouteDeps): Route[] {
       method: "POST",
       path: "/sessions",
       handler: async (_r, _p, b) => {
-        const { deviceId, headless } = body<{ deviceId: string; headless?: boolean }>(b);
+        const { deviceId, headless, proxyPort } = body<{
+          deviceId: string;
+          headless?: boolean;
+          proxyPort?: number;
+        }>(b);
         const device = await getDevice(workspace, deviceId);
-        return { session: await sessions.start(device, { trawlProxyPort, headless }) };
+        return {
+          session: await sessions.start(device, { trawlProxyPort: proxyPort ?? trawlProxyPort, headless }),
+        };
       },
     },
     { method: "GET", path: "/sessions", handler: async () => ({ sessions: sessions.list() }) },
@@ -96,6 +102,7 @@ export function buildRoutes(deps: RouteDeps): Route[] {
           env?: Record<string, string>;
           secrets?: Record<string, string>;
           headless?: boolean;
+          proxyPort?: number;
         }>(b);
         const code = input.code ?? (await readScript(workspace, input.path!));
         const device = await getDevice(workspace, input.deviceId);
@@ -107,6 +114,7 @@ export function buildRoutes(deps: RouteDeps): Route[] {
           env: input.env ?? {},
           secrets: input.secrets ?? {},
           headless: input.headless,
+          trawlProxyPort: input.proxyPort,
         });
       },
     },
@@ -126,10 +134,20 @@ export function buildRoutes(deps: RouteDeps): Route[] {
       method: "POST",
       path: "/record/start",
       handler: async (_r, _p, b) => {
-        const { sessionId, deviceId, url } = body<{ sessionId?: string; deviceId?: string; url?: string }>(b);
+        const { sessionId, deviceId, url, proxyPort } = body<{
+          sessionId?: string;
+          deviceId?: string;
+          url?: string;
+          proxyPort?: number;
+        }>(b);
         if (!sessionId && !deviceId) throw new AgentError("script", "deviceId or sessionId is required");
         const id =
-          sessionId ?? (await sessions.start(await getDevice(workspace, deviceId!), { trawlProxyPort })).sessionId;
+          sessionId ??
+          (
+            await sessions.start(await getDevice(workspace, deviceId!), {
+              trawlProxyPort: proxyPort ?? trawlProxyPort,
+            })
+          ).sessionId;
         return recorder.start(id, url);
       },
     },

@@ -42,7 +42,7 @@ for (let candidate = wanted; candidate < wanted + 20 && port < 0; candidate++) {
     token,
     getPort: () => port,
     routes: buildRoutes({ workspace, trawlProxyPort }),
-    health: () => ({ dsl: DSL_VERSION, steps: [...STEP_NAMES], workspace }),
+    health: () => ({ dsl: DSL_VERSION, steps: [...STEP_NAMES], workspace, proxyPort: trawlProxyPort }),
   });
   port = await listen(server, candidate);
 }
