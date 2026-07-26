@@ -101,6 +101,36 @@ it("supports reads and branching", async () => {
   expect(report.steps.map((s) => s.action)).toEqual(["goto", "getText", "note"]);
 });
 
+it("never leaks a secret into the report", async () => {
+  const report = await finish(
+    `goto('${fixture}')\nfill({ label: 'Пароль' }, secret('PWD'))\nexpectValue({ label: 'Email' }, 'wrong')`,
+    { PWD: "hunter2secret" },
+  );
+  expect(report.status).toBe("failed");
+  expect(JSON.stringify(report)).not.toContain("hunter2secret");
+  expect(JSON.stringify(report)).toContain("***");
+});
+
+it("substitutes project variables and fails loudly on an unknown one", async () => {
+  const started = await runner.start({
+    code: `goto('{{FIXTURE}}')\nexpectText({ css: '#title' }, 'Sign in')`,
+    device,
+    env: { FIXTURE: fixture },
+    secrets: {},
+  });
+  let report = runner.get(started.runId)!;
+  for (let i = 0; i < 300 && report.status === "running"; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    report = runner.get(started.runId)!;
+  }
+  expect(report.status).toBe("passed");
+  expect(report.steps[0]!.args[0]).toBe(fixture);
+
+  const bad = await finish(`goto('{{NOPE}}')`);
+  expect(bad.status).toBe("error");
+  expect(bad.steps.at(-1)!.error?.message).toContain("unknown variable: NOPE");
+});
+
 it("groups nested steps under step(name)", async () => {
   const report = await finish(`
     step('open', () => {

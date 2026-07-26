@@ -2,6 +2,7 @@
 import { createServer } from "./server.js";
 import { loadOrCreateToken } from "./auth.js";
 import { ensureWorkspace } from "./workspace.js";
+import { pruneRuns } from "./retention.js";
 import { AGENT_VERSION, DSL_VERSION } from "./version.js";
 import { STEP_NAMES } from "./steps.js";
 import { buildRoutes } from "./routes.js";
@@ -23,6 +24,9 @@ const listen = (server: ReturnType<typeof createServer>, candidate: number): Pro
 
 const token = await loadOrCreateToken();
 await ensureWorkspace(workspace);
+
+const pruned = await pruneRuns(workspace, Number(arg("keep-runs", "50")));
+if (pruned.length) console.log(`pruned ${pruned.length} old run(s)`);
 
 let port = -1;
 for (let candidate = wanted; candidate < wanted + 20 && port < 0; candidate++) {

@@ -7,6 +7,9 @@ import { runInSandbox } from "./sandbox.js";
 import { describeTarget, isRegExp, toLocator, toMatcher } from "./targets.js";
 import { SessionStore } from "./sessions.js";
 import { runDir } from "./workspace.js";
+import { TrafficBuffer, describeMatcher, parseMatcher, type MatcherObject } from "./traffic.js";
+import { interpolate } from "./interpolate.js";
+import { makeMasker } from "./mask.js";
 
 export interface RunnerDeps {
   sessions: SessionStore;
@@ -107,6 +110,14 @@ export class Runner {
     let current: StepResult | null = null;
     let currentName: string | undefined;
 
+    const traffic = new TrafficBuffer();
+    const detachTraffic = await TrafficBuffer.attach(
+      session.context,
+      report.runId,
+      () => (current ? current.index : report.steps.length),
+      traffic,
+    );
+
     const beginStep = (action: string, args: unknown[]): StepResult => {
       if (state.cancelled) throw new AgentError("script", "run cancelled");
       const step: StepResult = {
@@ -131,7 +142,8 @@ export class Runner {
     /** Wraps a step body: timing, failure classification, screenshot on failure. */
     const tracked =
       <A extends unknown[], R>(action: string, body: (...args: A) => Promise<R>) =>
-      async (...args: A): Promise<R> => {
+      async (...rawArgs: A): Promise<R> => {
+        const args = rawArgs.map((a) => interpolate(a, input.env)) as A;
         const step = beginStep(action, args);
         try {
           const result = await body(...args);
@@ -280,6 +292,61 @@ export class Runner {
         );
       }),
 
+      expectRequest: tracked("expectRequest", async (matcher: string | MatcherObject) => {
+        await traffic.consume(parseMatcher(matcher), timeout);
+      }),
+      waitForResponse: tracked("waitForResponse", async (matcher: string | MatcherObject) => {
+        await traffic.consume(parseMatcher(matcher), timeout);
+      }),
+      expectResponse: tracked(
+        "expectResponse",
+        async (
+          matcher: string | MatcherObject,
+          options: { status?: number; jsonPath?: Record<string, string | RegExp>; headerContains?: string } = {},
+        ) => {
+          const hit = await traffic.consume(parseMatcher(matcher), timeout);
+          if (options.status !== undefined && hit.status !== options.status) {
+            throw new AgentError("assertion", `status of ${describeMatcher(parseMatcher(matcher))} does not match`, {
+              expected: String(options.status),
+              actual: String(hit.status),
+            });
+          }
+          if (options.jsonPath) {
+            const text = (await hit.responseBody()) ?? "";
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(text);
+            } catch {
+              throw new AgentError("assertion", "response body is not JSON", {
+                expected: "JSON",
+                actual: text.slice(0, 120),
+              });
+            }
+            for (const [pointer, expected] of Object.entries(options.jsonPath)) {
+              const actual = readJsonPath(parsed, pointer);
+              const matcherValue = toMatcher(expected as never);
+              const ok = isRegExp(matcherValue) ? matcherValue.test(String(actual)) : actual === matcherValue;
+              if (!ok) {
+                throw new AgentError("assertion", `${pointer} does not match`, {
+                  expected: String(matcherValue),
+                  actual: JSON.stringify(actual),
+                });
+              }
+            }
+          }
+        },
+      ),
+      expectNoRequest: tracked("expectNoRequest", async (matcher: string | MatcherObject) => {
+        const since = current ? current.index : 0;
+        const hits = traffic.seenSince(since, parseMatcher(matcher));
+        if (hits.length) {
+          throw new AgentError("assertion", `unexpected request ${describeMatcher(parseMatcher(matcher))}`, {
+            expected: "no request",
+            actual: `${hits.length} request(s)`,
+          });
+        }
+      }),
+
       getText: tracked("getText", async (t: TargetSpec) => ((await locate(t).textContent({ timeout })) ?? "").trim()),
       getValue: tracked("getValue", async (t: TargetSpec) => locate(t).inputValue({ timeout })),
       getAttr: tracked("getAttr", async (t: TargetSpec, name: string) => locate(t).getAttribute(name, { timeout })),
@@ -304,12 +371,16 @@ export class Runner {
       },
     };
 
+    // Kept out of `report` until the artifacts are on disk: a poller that sees
+    // a final status must be able to read the report and its screenshots.
+    let finalStatus: RunReport["status"] = "running";
+
     try {
       await runInSandbox(input.code, scope, MAX_SCRIPT_MS);
-      report.status = "passed";
+      finalStatus = "passed";
     } catch (err) {
       const kind = err instanceof AgentError ? err.kind : "script";
-      report.status = kind === "assertion" || kind === "timeout" ? "failed" : "error";
+      finalStatus = kind === "assertion" || kind === "timeout" ? "failed" : "error";
       if (!report.steps.some((s) => s.status === "failed")) {
         // The script threw outside a step (e.g. a bare `throw`).
         report.steps.push({
@@ -326,8 +397,13 @@ export class Runner {
     } finally {
       // Steps after a failure were never executed, so they are simply absent:
       // guessing them would be a lie for any script that branches.
+      await detachTraffic();
+      for (const observed of traffic.all()) {
+        const step = report.steps[observed.step];
+        if (step) step.flows.push({ method: observed.method, url: observed.url, status: observed.status });
+      }
       if (traceOn) {
-        const keep = input.device.trace === "always" || report.status !== "passed";
+        const keep = input.device.trace === "always" || finalStatus !== "passed";
         const tracePath = path.join(dir, "trace.zip");
         await session.context.tracing.stop(keep ? { path: tracePath } : {}).catch(() => {});
         if (keep) report.artifacts.trace = "trace.zip";
@@ -335,7 +411,22 @@ export class Runner {
       report.durationMs = Date.now() - report.startedAt;
       if (ownSession) await this.deps.sessions.stop(session.sessionId);
       else this.deps.sessions.setState(session.sessionId, "idle");
-      await fs.writeFile(path.join(dir, "report.json"), JSON.stringify(report, null, 2), "utf8").catch(() => {});
+
+      const mask = makeMasker(input.secrets);
+      const finished = mask({ ...report, status: finalStatus }) as RunReport;
+      await fs.writeFile(path.join(dir, "report.json"), JSON.stringify(finished, null, 2), "utf8").catch(() => {});
+      state.report = finished;
     }
   }
+}
+
+/** Supports the `$.a.b[0]` subset — enough for response assertions. */
+function readJsonPath(value: unknown, pointer: string): unknown {
+  const parts = pointer.replace(/^\$\.?/, "").split(/[.[\]]+/).filter(Boolean);
+  let node: unknown = value;
+  for (const part of parts) {
+    if (node === null || node === undefined) return undefined;
+    node = (node as Record<string, unknown>)[part];
+  }
+  return node;
 }
