@@ -17,7 +17,12 @@ export const isRegExp = (v: unknown): v is RegExp => Object.prototype.toString.c
  */
 export function toMatcher(value: string | RegExp | RegexSpec): string | RegExp {
   if (isRegexSpec(value)) return new RegExp(value.__regex.source, value.__regex.flags);
-  if (isRegExp(value) && !(value instanceof RegExp)) return new RegExp(value.source, value.flags);
+  if (isRegExp(value)) {
+    // Rebuild only when it comes from another realm; TS cannot see that
+    // distinction, so the source/flags are read off a plain alias.
+    const foreign = value as { source: string; flags: string };
+    return value instanceof RegExp ? value : new RegExp(foreign.source, foreign.flags);
+  }
   return value;
 }
 

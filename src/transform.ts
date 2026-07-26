@@ -1,20 +1,15 @@
-import { parse } from "acorn";
+import { parse, type AnyNode, type CallExpression, type Node, type Program } from "acorn";
 import { ancestor, simple } from "acorn-walk";
-import type { Node } from "acorn";
 import { AgentError } from "./types.js";
 
-interface CallNode extends Node {
-  callee: { type: string; name?: string };
-}
-
-export function parseScript(code: string): Node {
+export function parseScript(code: string): Program {
   try {
     return parse(code, {
       ecmaVersion: "latest",
       sourceType: "script",
       allowAwaitOutsideFunction: true,
       allowReturnOutsideFunction: true,
-    }) as unknown as Node;
+    });
   } catch (err) {
     throw new AgentError("script", `syntax error: ${(err as Error).message}`);
   }
@@ -28,12 +23,15 @@ const FUNCTIONS = new Set(["FunctionDeclaration", "FunctionExpression", "ArrowFu
  * the value's parameter list.
  */
 function asyncInsertPoint(fn: Node, parent: Node | undefined): number {
-  const p = parent as unknown as { type: string; method?: boolean; value?: Node; key?: Node } | undefined;
+  const p = parent as unknown as { type: string; value?: Node; key?: Node } | undefined;
   if (p && (p.type === "Property" || p.type === "MethodDefinition") && p.value === fn && p.key) {
-    return (p.key as Node).start;
+    return p.key.start;
   }
   return fn.start;
 }
+
+const calleeName = (node: CallExpression): string | null =>
+  node.callee.type === "Identifier" ? node.callee.name : null;
 
 /**
  * Insert `await` before every bare call to a known step name, and mark the
@@ -45,20 +43,20 @@ export function addAwaits(code: string, stepNames: readonly string[]): string {
   const names = new Set(stepNames);
   const inserts = new Map<number, string>();
 
-  ancestor(ast as never, {
-    CallExpression(node: never, _state: unknown, anc: readonly Node[]) {
-      const call = node as unknown as CallNode;
-      if (call.callee.type !== "Identifier" || !call.callee.name || !names.has(call.callee.name)) return;
-      const parent = anc[anc.length - 2];
+  ancestor(ast, {
+    CallExpression(node, _state, ancestors) {
+      const name = calleeName(node);
+      if (!name || !names.has(name)) return;
+      const parent = ancestors[ancestors.length - 2];
       if (parent?.type === "AwaitExpression") return;
-      inserts.set(call.start, "await ");
+      inserts.set(node.start, "await ");
 
-      // Nearest enclosing function must be async for that await to be legal.
-      for (let i = anc.length - 2; i >= 0; i--) {
-        const fn = anc[i]!;
+      // The nearest enclosing function must be async for that await to be legal.
+      for (let i = ancestors.length - 2; i >= 0; i--) {
+        const fn = ancestors[i]!;
         if (!FUNCTIONS.has(fn.type)) continue;
-        if (!(fn as unknown as { async?: boolean }).async) {
-          inserts.set(asyncInsertPoint(fn, anc[i - 1]), "async ");
+        if (!(fn as { async?: boolean }).async) {
+          inserts.set(asyncInsertPoint(fn, ancestors[i - 1]), "async ");
         }
         break;
       }
@@ -76,10 +74,10 @@ export function addAwaits(code: string, stepNames: readonly string[]): string {
 export function hasBranching(code: string): boolean {
   const ast = parseScript(code);
   let found = false;
-  const mark = () => {
+  const mark = (): void => {
     found = true;
   };
-  simple(ast as never, {
+  simple(ast, {
     IfStatement: mark,
     ForStatement: mark,
     ForOfStatement: mark,
@@ -104,18 +102,17 @@ export function unknownCalls(
   const declared = new Set<string>();
   const called = new Set<string>();
 
-  simple(ast as never, {
-    FunctionDeclaration(node: never) {
-      const n = node as { id?: { name: string } };
-      if (n.id) declared.add(n.id.name);
-    },
-    VariableDeclarator(node: never) {
-      const n = node as { id: { type: string; name?: string } };
-      if (n.id.type === "Identifier" && n.id.name) declared.add(n.id.name);
-    },
-    CallExpression(node: never) {
-      const call = node as unknown as CallNode;
-      if (call.callee.type === "Identifier" && call.callee.name) called.add(call.callee.name);
+  const declare = (node: AnyNode): void => {
+    if (node.type === "FunctionDeclaration" && node.id) declared.add(node.id.name);
+    if (node.type === "VariableDeclarator" && node.id.type === "Identifier") declared.add(node.id.name);
+  };
+
+  simple(ast, {
+    FunctionDeclaration: declare,
+    VariableDeclarator: declare,
+    CallExpression(node) {
+      const name = calleeName(node);
+      if (name) called.add(name);
     },
   });
 
