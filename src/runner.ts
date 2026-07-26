@@ -6,7 +6,7 @@ import { AgentError, type Device, type RunReport, type StepResult, type TargetSp
 import { runInSandbox } from "./sandbox.js";
 import { describeTarget, isRegExp, resolveTarget, toLocator, toMatcher } from "./targets.js";
 import { SessionStore } from "./sessions.js";
-import { readScript, runDir } from "./workspace.js";
+import { readScript, runDir, statePath } from "./workspace.js";
 import { TrafficBuffer, describeMatcher, parseMatcher, type MatcherObject } from "./traffic.js";
 import { interpolate } from "./interpolate.js";
 import { makeMasker } from "./mask.js";
@@ -415,6 +415,39 @@ export class Runner {
         await page.screenshot({ path: path.join(dir, file) });
       }),
       note: tracked("note", async () => {}),
+
+      /** Sign in once, reuse everywhere: cookies and localStorage to a file. */
+      saveState: tracked("saveState", async (name: string = "auth") => {
+        const file = statePath(this.deps.workspace, name);
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await session.context.storageState({ path: file });
+      }),
+
+      /**
+       * Load a saved sign-in into the running browser. Cookies apply at once;
+       * localStorage is seeded per origin, which needs a page on that origin —
+       * so this is normally the step right after the first goto.
+       */
+      useState: tracked("useState", async (name: string = "auth") => {
+        const file = statePath(this.deps.workspace, name);
+        const raw = await fs.readFile(file, "utf8").catch(() => {
+          throw new AgentError("script", `no saved state: ${name} — call saveState('${name}') first`);
+        });
+        const state = JSON.parse(raw) as {
+          cookies?: Parameters<typeof session.context.addCookies>[0];
+          origins?: { origin: string; localStorage: { name: string; value: string }[] }[];
+        };
+
+        if (state.cookies?.length) await session.context.addCookies(state.cookies);
+
+        const current = new URL(page.url() === "about:blank" ? "http://localhost" : page.url()).origin;
+        const forHere = state.origins?.find((o) => o.origin === current);
+        if (forHere) {
+          await page.evaluate((entries) => {
+            for (const { name: key, value } of entries) window.localStorage.setItem(key, value);
+          }, forHere.localStorage);
+        }
+      }),
 
       // Mocks are applied by Trawl's proxy — the rules were created before this
       // run started. Recording the step keeps the report honest about intent.

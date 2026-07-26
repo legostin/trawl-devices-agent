@@ -56,6 +56,7 @@ the recording says so in its warnings.
 - HTTP assertions: `expectRequest`, `expectResponse`, `expectNoRequest`
 - Reads: `getText`, `getValue`, `getAttr`, `getUrl`, `count`
 - Composition: `run('scripts/login.js')`, `run('scripts/login.js', { USER: 'someone@example.com' })`
+- Signed-in state: `saveState('auth')`, `useState('auth')`
 - Mocks (applied by Trawl's proxy): `mock('GET api/orders', { status: 500 })`,
   `mock('GET api/orders', { json: { items: [] } })`,
   `mock('POST api/login', { status: 429, delayMs: 2000 })`, `unmock('GET api/orders')`
@@ -79,7 +80,11 @@ the recording says so in its warnings.
    apply to hosts inside the active project's scope, and the faked exchange shows
    up in the traffic list like any other flow. A mock that never fired is
    reported as a warning rather than passing quietly.
-8. **Compose instead of repeating.** Record login once and call it:
+8. **Sign in once.** End a login scenario with `saveState('auth')`; other
+   scenarios call `useState('auth')` right after their first `goto` and skip the
+   login entirely. Cookies apply immediately; localStorage is seeded for the
+   origin the page is on, so the order matters.
+9. **Compose instead of repeating.** Record login once and call it:
 
 ```js
 run('scripts/login.js')

@@ -14,6 +14,13 @@ export function resolveInWorkspace(root: string, rel: string): string {
 
 export const scriptsDir = (root: string) => path.join(path.resolve(root), "scripts");
 export const runsDir = (root: string) => path.join(path.resolve(root), "runs");
+export const stateDir = (root: string) => path.join(path.resolve(root), "state");
+
+/** `auth` and `state/auth.json` both mean the same file. */
+export const statePath = (root: string, name: string): string => {
+  const rel = name.includes("/") ? name : `state/${name}`;
+  return resolveInWorkspace(root, rel.endsWith(".json") ? rel : `${rel}.json`);
+};
 export const runDir = (root: string, runId: string) => path.join(runsDir(root), runId);
 
 export async function ensureWorkspace(root: string): Promise<void> {
