@@ -13,10 +13,29 @@
   "engines": {
     "node": ">=20"
   },
+  "license": "MIT",
+  "author": "legostin",
+  "homepage": "https://github.com/legostin/trawl-devices-agent#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/legostin/trawl-devices-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/legostin/trawl-devices-agent/issues"
+  },
+  "keywords": [
+    "trawl",
+    "playwright",
+    "testing",
+    "browser-automation",
+    "record-and-replay",
+    "mcp"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "prepublishOnly": "pnpm build"
   },
   "dependencies": {
     "acorn": "^8.17.0",
