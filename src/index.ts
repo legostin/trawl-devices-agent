@@ -7,6 +7,7 @@ import { ensureBrowser } from "./browsers.js";
 import { AGENT_VERSION, DSL_VERSION } from "./version.js";
 import { STEP_NAMES } from "./steps.js";
 import { buildRoutes } from "./routes.js";
+import { SessionStore } from "./sessions.js";
 import os from "node:os";
 import path from "node:path";
 
@@ -36,12 +37,28 @@ if (process.argv.includes("--ensure-browser")) {
 const pruned = await pruneRuns(workspace, Number(arg("keep-runs", "50")));
 if (pruned.length) console.log(`pruned ${pruned.length} old run(s)`);
 
+// Owned here so the shutdown path can close every browser: a killed agent that
+// leaves Chromium behind is exactly what "the browser won't close" looks like.
+const sessions = new SessionStore();
+
+let shuttingDown = false;
+const shutdown = async (signal: string): Promise<void> => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[agent] ${signal} — closing browsers`);
+  await sessions.stopAll().catch(() => {});
+  process.exit(0);
+};
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.on(signal, () => void shutdown(signal));
+}
+
 let port = -1;
 for (let candidate = wanted; candidate < wanted + 20 && port < 0; candidate++) {
   const server = createServer({
     token,
     getPort: () => port,
-    routes: buildRoutes({ workspace, trawlProxyPort }),
+    routes: buildRoutes({ workspace, trawlProxyPort, sessions }),
     health: () => ({ dsl: DSL_VERSION, steps: [...STEP_NAMES], workspace, proxyPort: trawlProxyPort }),
   });
   port = await listen(server, candidate);

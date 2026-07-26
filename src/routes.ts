@@ -159,7 +159,8 @@ export function buildRoutes(deps: RouteDeps): Route[] {
     {
       method: "POST",
       path: "/record/:id/stop",
-      handler: async (_r, p, b) => recorder.stop(p.id!, (b ?? {}) as { saveAs?: string; withTraffic?: boolean }),
+      handler: async (_r, p, b) =>
+        recorder.stop(p.id!, (b ?? {}) as { saveAs?: string; withTraffic?: boolean; closeSession?: boolean }),
     },
 
     {

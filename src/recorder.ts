@@ -28,6 +28,8 @@ const isRecordableUrl = (url: string): boolean =>
 export interface StopOptions {
   saveAs?: string;
   withTraffic?: boolean;
+  /** Close the browser window when the recording ends (default: keep it open). */
+  closeSession?: boolean;
 }
 
 interface RecorderDeps {
@@ -161,7 +163,10 @@ export class RecorderStore {
     await session.page.waitForTimeout(150);
 
     this.recordings.delete(id);
-    this.deps.sessions.setState(recording.sessionId, "idle");
+    // The window stays open on purpose: you often want to keep clicking around
+    // after stopping, and a run decides for itself whether to close it.
+    if (options.closeSession === true) await this.deps.sessions.stop(recording.sessionId);
+    else this.deps.sessions.setState(recording.sessionId, "idle");
 
     const code = generate(recording.steps, { header: "recorded by trawl-devices-agent" });
     if (options.saveAs) await writeScript(this.deps.workspace, options.saveAs, code);
