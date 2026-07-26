@@ -27,6 +27,8 @@ export interface TargetSpec {
   css?: string;
   within?: TargetSpec;
   nth?: number;
+  /** Fallbacks tried in order when the primary no longer resolves. */
+  or?: TargetSpec[];
 }
 
 export interface Device {
@@ -83,6 +85,8 @@ export interface StepResult extends StepRecord {
   startedAt: number;
   durationMs: number;
   error?: { kind: ErrorKind; message: string; expected?: string; actual?: string };
+  /** Set when a fallback target had to be used instead of the primary. */
+  healed?: { used: TargetSpec; index: number };
   screenshot?: string;
   flows: FlowRef[];
 }

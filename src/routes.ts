@@ -9,6 +9,7 @@ import { RecorderStore } from "./recorder.js";
 import { performAction, snapshot, type ActionInput } from "./control.js";
 import { readGuide } from "./guide.js";
 import { listArtifacts, listRuns, readArtifact } from "./archive.js";
+import { heal } from "./heal.js";
 
 export interface RouteDeps {
   workspace: string;
@@ -204,6 +205,32 @@ export function buildRoutes(deps: RouteDeps): Route[] {
       handler: async (_r, _p, b) => {
         const { sessionId, ...action } = body<{ sessionId: string } & ActionInput>(b);
         return performAction(sessions.get(sessionId).page, action);
+      },
+    },
+
+    {
+      method: "POST",
+      path: "/heal",
+      handler: async (_r, _p, b) => {
+        const input = body<{
+          runId: string;
+          deviceId: string;
+          env?: Record<string, string>;
+          secrets?: Record<string, string>;
+          proxyPort?: number;
+        }>(b);
+        const report = runner.get(input.runId) ?? (await listRuns(workspace)).find((r) => r.runId === input.runId);
+        if (!report) throw new AgentError("agent", `unknown run: ${input.runId}`);
+        const code = report.script ? await readScript(workspace, report.script) : null;
+        if (!code) throw new AgentError("script", "healing needs a saved script — this run used inline code");
+        return heal(sessions, workspace, {
+          report,
+          code,
+          device: await getDevice(workspace, input.deviceId),
+          env: input.env ?? {},
+          secrets: input.secrets ?? {},
+          proxyPort: input.proxyPort,
+        });
       },
     },
 

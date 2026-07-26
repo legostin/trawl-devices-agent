@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Locator } from "playwright";
 import { AgentError, type Device, type RunReport, type StepResult, type TargetSpec } from "./types.js";
 import { runInSandbox } from "./sandbox.js";
-import { describeTarget, isRegExp, toLocator, toMatcher } from "./targets.js";
+import { describeTarget, isRegExp, resolveTarget, toLocator, toMatcher } from "./targets.js";
 import { SessionStore } from "./sessions.js";
 import { readScript, runDir } from "./workspace.js";
 import { TrafficBuffer, describeMatcher, parseMatcher, type MatcherObject } from "./traffic.js";
@@ -44,6 +44,8 @@ interface RunState {
 const DEFAULT_TIMEOUT = 15_000;
 const MAX_SCRIPT_MS = 10 * 60_000;
 const MAX_RUN_DEPTH = 10;
+/** How long to wait on the primary target before trying a fallback. */
+const HEAL_PROBE_MS = 3_000;
 
 export class Runner {
   private readonly runs = new Map<string, RunState>();
@@ -202,7 +204,25 @@ export class Runner {
         }
       };
 
-    const locate = (target: TargetSpec): Locator => toLocator(page, target);
+    /**
+     * Resolve a target, falling back to the alternatives the recorder saved.
+     * A markup change that only breaks the primary should cost a warning, not
+     * the run — but it is written into the report, never swallowed.
+     */
+    const find = async (target: TargetSpec): Promise<Locator> => {
+      const resolved = await resolveTarget(page, target, Math.min(timeout, HEAL_PROBE_MS));
+      if (resolved.index > 0) {
+        const step = current;
+        if (step) {
+          step.healed = { used: resolved.used, index: resolved.index };
+          report.warnings.push(
+            `step ${step.index} (${step.action}): the primary target no longer matches, ` +
+              `used the fallback ${describeTarget(resolved.used)}`,
+          );
+        }
+      }
+      return resolved.locator;
+    };
     const url = (u: string): string => (baseUrl && u.startsWith("/") ? baseUrl.replace(/\/$/, "") + u : u);
 
     const assertThat = (ok: boolean, message: string, expected: string, actual: string): void => {
@@ -245,45 +265,45 @@ export class Runner {
       }),
 
       click: tracked("click", async (t: TargetSpec) => {
-        await locate(t).click({ timeout });
+        await (await find(t)).click({ timeout });
       }),
       dblclick: tracked("dblclick", async (t: TargetSpec) => {
-        await locate(t).dblclick({ timeout });
+        await (await find(t)).dblclick({ timeout });
       }),
       fill: tracked("fill", async (t: TargetSpec, v: string) => {
-        await locate(t).fill(v, { timeout });
+        await (await find(t)).fill(v, { timeout });
       }),
       type: tracked("type", async (t: TargetSpec, v: string) => {
-        await locate(t).pressSequentially(v, { timeout });
+        await (await find(t)).pressSequentially(v, { timeout });
       }),
       press: tracked("press", async (t: TargetSpec | null, key: string) => {
-        if (t) await locate(t).press(key, { timeout });
+        if (t) await (await find(t)).press(key, { timeout });
         else await page.keyboard.press(key);
       }),
       check: tracked("check", async (t: TargetSpec) => {
-        await locate(t).check({ timeout });
+        await (await find(t)).check({ timeout });
       }),
       uncheck: tracked("uncheck", async (t: TargetSpec) => {
-        await locate(t).uncheck({ timeout });
+        await (await find(t)).uncheck({ timeout });
       }),
       select: tracked("select", async (t: TargetSpec, v: string) => {
-        await locate(t).selectOption(v, { timeout });
+        await (await find(t)).selectOption(v, { timeout });
       }),
       hover: tracked("hover", async (t: TargetSpec) => {
-        await locate(t).hover({ timeout });
+        await (await find(t)).hover({ timeout });
       }),
       upload: tracked("upload", async (t: TargetSpec, file: string) => {
-        await locate(t).setInputFiles(path.resolve(this.deps.workspace, file), { timeout });
+        await (await find(t)).setInputFiles(path.resolve(this.deps.workspace, file), { timeout });
       }),
       drag: tracked("drag", async (from: TargetSpec, to: TargetSpec) => {
-        await locate(from).dragTo(locate(to), { timeout });
+        await (await find(from)).dragTo((await find(to)), { timeout });
       }),
       scrollTo: tracked("scrollTo", async (t: TargetSpec) => {
-        await locate(t).scrollIntoViewIfNeeded({ timeout });
+        await (await find(t)).scrollIntoViewIfNeeded({ timeout });
       }),
 
       waitFor: tracked("waitFor", async (t: TargetSpec, stateName: "visible" | "hidden" | "attached" = "visible") => {
-        await locate(t).waitFor({ state: stateName, timeout });
+        await (await find(t)).waitFor({ state: stateName, timeout });
       }),
       waitForUrl: tracked("waitForUrl", async (pattern: string) => {
         await page.waitForURL(pattern, { timeout });
@@ -293,19 +313,19 @@ export class Runner {
       }),
 
       expectVisible: tracked("expectVisible", async (t: TargetSpec) => {
-        await locate(t).waitFor({ state: "visible", timeout });
+        await (await find(t)).waitFor({ state: "visible", timeout });
       }),
       expectHidden: tracked("expectHidden", async (t: TargetSpec) => {
-        await locate(t).waitFor({ state: "hidden", timeout });
+        await (await find(t)).waitFor({ state: "hidden", timeout });
       }),
       expectText: tracked("expectText", async (t: TargetSpec, expected: string | RegExp) => {
-        const actual = ((await locate(t).textContent({ timeout })) ?? "").trim();
+        const actual = ((await (await find(t)).textContent({ timeout })) ?? "").trim();
         const matcher = toMatcher(expected as never);
         const ok = isRegExp(matcher) ? matcher.test(actual) : actual === matcher;
         assertThat(ok, `text of ${describeTarget(t)} does not match`, String(matcher), actual);
       }),
       expectValue: tracked("expectValue", async (t: TargetSpec, expected: string) => {
-        const actual = await locate(t).inputValue({ timeout });
+        const actual = await (await find(t)).inputValue({ timeout });
         assertThat(actual === expected, `value of ${describeTarget(t)} does not match`, expected, actual);
       }),
       expectUrl: tracked("expectUrl", async (pattern: string) => {
@@ -316,11 +336,11 @@ export class Runner {
         }
       }),
       expectCount: tracked("expectCount", async (t: TargetSpec, expected: number) => {
-        const actual = await locate(t).count();
+        const actual = await (await find(t)).count();
         assertThat(actual === expected, `count of ${describeTarget(t)} does not match`, String(expected), String(actual));
       }),
       expectAttr: tracked("expectAttr", async (t: TargetSpec, name: string, expected: string) => {
-        const actual = await locate(t).getAttribute(name, { timeout });
+        const actual = await (await find(t)).getAttribute(name, { timeout });
         assertThat(
           actual === expected,
           `attribute ${name} of ${describeTarget(t)} does not match`,
@@ -384,11 +404,11 @@ export class Runner {
         }
       }),
 
-      getText: tracked("getText", async (t: TargetSpec) => ((await locate(t).textContent({ timeout })) ?? "").trim()),
-      getValue: tracked("getValue", async (t: TargetSpec) => locate(t).inputValue({ timeout })),
-      getAttr: tracked("getAttr", async (t: TargetSpec, name: string) => locate(t).getAttribute(name, { timeout })),
+      getText: tracked("getText", async (t: TargetSpec) => ((await (await find(t)).textContent({ timeout })) ?? "").trim()),
+      getValue: tracked("getValue", async (t: TargetSpec) => (await find(t)).inputValue({ timeout })),
+      getAttr: tracked("getAttr", async (t: TargetSpec, name: string) => (await find(t)).getAttribute(name, { timeout })),
       getUrl: tracked("getUrl", async () => page.url()),
-      count: tracked("count", async (t: TargetSpec) => locate(t).count()),
+      count: tracked("count", async (t: TargetSpec) => (await find(t)).count()),
 
       screenshot: tracked("screenshot", async (name?: string) => {
         const file = `${name ?? `shot-${report.steps.length}`}.png`;

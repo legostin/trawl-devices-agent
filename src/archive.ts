@@ -99,3 +99,16 @@ export async function readArtifact(
     size: data.length,
   };
 }
+
+
+const words = (value: string): string[] =>
+  value.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 1);
+
+/** Crude similarity: shared words, normalised. Enough to rank a page's nodes. */
+export function similarity(a: string, b: string): number {
+  const left = new Set(words(a));
+  const right = words(b);
+  if (left.size === 0 || right.length === 0) return 0;
+  const hits = right.filter((w) => left.has(w)).length;
+  return hits / Math.max(left.size, right.length);
+}

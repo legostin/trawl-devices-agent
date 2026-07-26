@@ -88,11 +88,12 @@ export const RECORDER_SOURCE = String.raw`
     // so "the third row" survives the numbers inside it changing.
     if (role) out.push({ role: role });
 
-    // Only then the wording that looks like data, as something still readable.
-    if (role && name && looksDynamic(name)) out.push({ role: role, name: name });
-    if (label && looksDynamic(label)) out.push({ label: label });
-    if (placeholder && looksDynamic(placeholder)) out.push({ placeholder: placeholder });
-    if (own && own.length <= 40 && looksDynamic(own)) out.push({ text: own });
+    // Only then the wording that looks like data. It is marked so the Node side
+    // can use it as a last resort without ever saving it as a fallback.
+    if (role && name && looksDynamic(name)) out.push({ role: role, name: name, __dyn: true });
+    if (label && looksDynamic(label)) out.push({ label: label, __dyn: true });
+    if (placeholder && looksDynamic(placeholder)) out.push({ placeholder: placeholder, __dyn: true });
+    if (own && own.length <= 40 && looksDynamic(own)) out.push({ text: own, __dyn: true });
 
     out.push({ css: cssPath(el) });
     return out;

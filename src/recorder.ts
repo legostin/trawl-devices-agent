@@ -45,8 +45,19 @@ interface RawEvent {
 
 const MARK = "data-trawl-rec-el";
 
+/** The in-page recorder flags candidates whose wording looks like data. */
+const isDynamic = (target: TargetSpec): boolean => (target as { __dyn?: boolean }).__dyn === true;
+
+/** Strip the flag before the target reaches a script. */
+const clean = (target: TargetSpec): TargetSpec => {
+  const { __dyn: _drop, ...rest } = target as TargetSpec & { __dyn?: boolean };
+  return rest;
+};
+
 /** Past this, a candidate is too vague to pin down by index. */
 const MAX_AMBIGUOUS_MATCHES = 30;
+/** How many fallbacks to keep beside the primary target. */
+const MAX_ALTERNATIVES = 2;
 
 export class RecorderStore {
   private readonly recordings = new Map<string, Recording>();
@@ -113,13 +124,37 @@ export class RecorderStore {
    * resolves to exactly one element, and to *the* marked element, wins.
    */
   private async pickTarget(page: Page, candidates: TargetSpec[], recording: Recording): Promise<TargetSpec> {
+    const verified = await this.verifyCandidates(page, candidates, recording);
+    if (verified.length === 0) {
+      const fallback = candidates.at(-1);
+      if (!fallback) throw new AgentError("script", "no candidate target");
+      recording.warnings.push(`no verified target; fell back to ${JSON.stringify(fallback)}`);
+      return fallback;
+    }
+    // Keep a couple of alternatives: the replay uses them when a refactor
+    // breaks the primary, instead of failing on a cosmetic change. Wording that
+    // looks like data is never kept — a fallback pinned to today's order number
+    // would put that number back into the scenario.
+    const [primary, ...rest] = verified;
+    const alternatives = rest.filter((c) => !isDynamic(c)).slice(0, MAX_ALTERNATIVES).map(clean);
+    const chosen = clean(primary!);
+    return alternatives.length ? { ...chosen, or: alternatives } : chosen;
+  }
+
+  /** Every candidate that resolves to the clicked element, best first. */
+  private async verifyCandidates(
+    page: Page,
+    candidates: TargetSpec[],
+    recording: Recording,
+  ): Promise<TargetSpec[]> {
+    const verified: TargetSpec[] = [];
     for (const candidate of candidates) {
       try {
         const locator = toLocator(page, candidate);
         const count = await locator.count();
         if (count === 0) continue;
         if (count === 1) {
-          if (await this.isMarked(locator)) return candidate;
+          if (await this.isMarked(locator)) verified.push(candidate);
           continue;
         }
         // Ambiguous on its own, but still usable: pin it to the element that was
@@ -128,20 +163,21 @@ export class RecorderStore {
         if (count > MAX_AMBIGUOUS_MATCHES) continue;
         for (let i = 0; i < count; i++) {
           if (await this.isMarked(locator.nth(i))) {
-            recording.warnings.push(
-              `matched by position: ${JSON.stringify(candidate)} [${i}] — check it if the list can reorder`,
-            );
-            return { ...candidate, nth: i };
+            if (verified.length === 0) {
+              recording.warnings.push(
+                `matched by position: ${JSON.stringify(candidate)} [${i}] — check it if the list can reorder`,
+              );
+            }
+            verified.push({ ...candidate, nth: i });
+            break;
           }
         }
       } catch {
         // try the next candidate
       }
+      if (verified.length > MAX_ALTERNATIVES) break; // enough to heal with
     }
-    const fallback = candidates.at(-1);
-    if (!fallback) throw new AgentError("script", "no candidate target");
-    recording.warnings.push(`no verified target; fell back to ${JSON.stringify(fallback)}`);
-    return fallback;
+    return verified;
   }
 
   private async isMarked(locator: ReturnType<typeof toLocator>): Promise<boolean> {

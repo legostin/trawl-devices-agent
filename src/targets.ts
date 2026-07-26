@@ -62,3 +62,38 @@ export function describeTarget(target: TargetSpec): string {
   if (target.nth !== undefined) parts.push(`[${target.nth}]`);
   return parts.join(" ");
 }
+
+export interface Resolved {
+  locator: Locator;
+  /** 0 = the primary target, 1+ = the fallback that worked. */
+  index: number;
+  used: TargetSpec;
+}
+
+/**
+ * The primary target, or the first fallback that still finds exactly one
+ * element. A cosmetic markup change should cost a warning, not a red run —
+ * but a silent switch would hide real drift, so the caller reports it.
+ */
+export async function resolveTarget(
+  scope: Page | Locator,
+  target: TargetSpec,
+  probeTimeoutMs: number,
+): Promise<Resolved> {
+  const candidates: TargetSpec[] = [{ ...target, or: undefined }, ...(target.or ?? [])];
+
+  for (let index = 0; index < candidates.length; index++) {
+    const candidate = candidates[index]!;
+    const locator = toLocator(scope, candidate);
+    // The last candidate is returned even if it looks empty: letting the step
+    // fail on it produces Playwright's own, far more useful error message.
+    if (index === candidates.length - 1) return { locator, index, used: candidate };
+    try {
+      await locator.first().waitFor({ state: "attached", timeout: probeTimeoutMs });
+      return { locator, index, used: candidate };
+    } catch {
+      // try the next one
+    }
+  }
+  throw new AgentError("script", `empty target: ${JSON.stringify(target)}`);
+}

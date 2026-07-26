@@ -42,13 +42,16 @@ it("records clicks and typing as declarative steps", async () => {
   expect(actions).toContain("fill");
   expect(actions).toContain("click");
 
-  // The ladder prefers role+name over label, and testId over everything.
+  // The ladder prefers role+name over label, and testId over everything; the
+  // runners-up are kept as fallbacks for when a refactor breaks the primary.
   const fillStep = result.steps.find((s) => s.action === "fill")!;
-  expect(fillStep.args[0]).toEqual({ role: "textbox", name: "Email" });
+  expect(fillStep.args[0]).toMatchObject({ role: "textbox", name: "Email" });
+  expect((fillStep.args[0] as { or?: unknown[] }).or).toContainEqual({ label: "Email" });
   expect(fillStep.args[1]).toBe("user@example.com");
 
   const clickStep = result.steps.find((s) => s.action === "click")!;
-  expect(clickStep.args[0]).toEqual({ testId: "submit" });
+  expect(clickStep.args[0]).toMatchObject({ testId: "submit" });
+  expect((clickStep.args[0] as { or?: unknown[] }).or).toContainEqual({ role: "button", name: "Войти" });
   expect(result.warnings).toEqual([]);
 });
 
@@ -168,9 +171,9 @@ it("prefers wording without digits, and matches by position when the text is dat
   const clicks = result.steps.filter((s) => s.action === "click");
   const [button, order] = clicks.map((s) => s.args[0] as Record<string, unknown>);
 
-  expect(button).toEqual({ role: "button", name: "Создать заказ" });
+  expect(button).toMatchObject({ role: "button", name: "Создать заказ" });
 
-  // The order link must not be pinned to today's number.
+  // The order link must not be pinned to today's number — not even as a fallback.
   expect(JSON.stringify(order)).not.toContain("42");
   expect(order).toMatchObject({ role: "link", nth: 1 });
   expect(result.warnings.some((w) => w.includes("matched by position"))).toBe(true);

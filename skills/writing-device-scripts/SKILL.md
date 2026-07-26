@@ -25,7 +25,15 @@ expectText({ testId: 'greeting' }, /Привет/)
 ## Targets
 
 Prefer, in order: `{ testId }`, `{ role, name }`, `{ label }`, `{ placeholder }`,
-`{ text }`, `{ css }`. Narrow with `within` and `nth`:
+`{ text }`, `{ css }`. Narrow with `within` and `nth`, and keep fallbacks in
+`or` — the replay uses them when a refactor breaks the primary, and says so in
+the report:
+
+```js
+click({ testId: 'submit', or: [{ role: 'button', name: 'Войти' }] })
+```
+
+Narrow with `within` and `nth`:
 
 ```js
 click({ role: 'row', name: 'Заказ 42', within: { testId: 'orders' } })
