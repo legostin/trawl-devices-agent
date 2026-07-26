@@ -127,7 +127,12 @@ export class RecorderStore {
         // strict-mode violation the moment the page has siblings like it.
         if (count > MAX_AMBIGUOUS_MATCHES) continue;
         for (let i = 0; i < count; i++) {
-          if (await this.isMarked(locator.nth(i))) return { ...candidate, nth: i };
+          if (await this.isMarked(locator.nth(i))) {
+            recording.warnings.push(
+              `matched by position: ${JSON.stringify(candidate)} [${i}] — check it if the list can reorder`,
+            );
+            return { ...candidate, nth: i };
+          }
         }
       } catch {
         // try the next candidate

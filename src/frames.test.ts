@@ -39,3 +39,25 @@ it("records frames at the configured rate, with the cursor drawn in", async () =
   expect(files.length).toBeGreaterThanOrEqual(5); // ~1.5s of run at 5 fps
   await rm(root, { recursive: true, force: true });
 }, 60_000);
+
+it("a run shorter than one frame interval still records the end state", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "vid-short-"));
+  const device = validateDevice({
+    id: "s", name: "S", headless: true, proxy: { mode: "none" }, trace: "off",
+    video: true, videoFps: 1, // one frame per second — the run is far shorter
+  });
+  const runner = new Runner({ sessions, workspace: root, trawlProxyPort: 8080 });
+
+  const started = await runner.start({ code: `goto('${fixture}')`, device, env: {}, secrets: {} });
+  let report: RunReport = runner.get(started.runId)!;
+  for (let i = 0; i < 300 && report.status === "running"; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    report = runner.get(started.runId)!;
+  }
+
+  expect(report.status).toBe("passed");
+  expect(report.artifacts.frames?.count).toBeGreaterThanOrEqual(1);
+  const files = await readdir(path.join(root, "runs", started.runId, "frames"));
+  expect(files.length).toBe(report.artifacts.frames!.count);
+  await rm(root, { recursive: true, force: true });
+}, 60_000);

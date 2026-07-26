@@ -62,20 +62,38 @@ export const RECORDER_SOURCE = String.raw`
 
   const labelText = (el) => (el.labels && el.labels[0] ? norm(el.labels[0].textContent) : '');
 
+  // Text carrying digits is almost always data — an order number, a price, a
+  // date, a count. Matching on it records today's data as tomorrow's selector.
+  const looksDynamic = (s) => /\d/.test(s);
+
   /** Ordered candidate targets, best first. */
   const candidates = (el) => {
     const out = [];
     const testId = el.getAttribute('data-testid') || el.getAttribute('data-test-id') || el.getAttribute('data-qa');
     if (testId) out.push({ testId: testId });
+
     const role = implicitRole(el);
     const name = accessibleName(el);
-    if (role && name) out.push({ role: role, name: name });
     const label = labelText(el);
-    if (label) out.push({ label: label });
     const placeholder = el.getAttribute('placeholder');
-    if (placeholder) out.push({ placeholder: placeholder });
     const own = norm(el.textContent);
-    if (own && own.length <= 40) out.push({ text: own });
+
+    // Stable wording first.
+    if (role && name && !looksDynamic(name)) out.push({ role: role, name: name });
+    if (label && !looksDynamic(label)) out.push({ label: label });
+    if (placeholder && !looksDynamic(placeholder)) out.push({ placeholder: placeholder });
+    if (own && own.length <= 40 && !looksDynamic(own)) out.push({ text: own });
+
+    // Then structure: the Node side pins this to the element that was clicked,
+    // so "the third row" survives the numbers inside it changing.
+    if (role) out.push({ role: role });
+
+    // Only then the wording that looks like data, as something still readable.
+    if (role && name && looksDynamic(name)) out.push({ role: role, name: name });
+    if (label && looksDynamic(label)) out.push({ label: label });
+    if (placeholder && looksDynamic(placeholder)) out.push({ placeholder: placeholder });
+    if (own && own.length <= 40 && looksDynamic(own)) out.push({ text: own });
+
     out.push({ css: cssPath(el) });
     return out;
   };

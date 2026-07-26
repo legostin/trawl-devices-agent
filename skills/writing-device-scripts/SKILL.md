@@ -31,6 +31,11 @@ Prefer, in order: `{ testId }`, `{ role, name }`, `{ label }`, `{ placeholder }`
 click({ role: 'row', name: 'Заказ 42', within: { testId: 'orders' } })
 ```
 
+Recording follows the same order, with one twist: wording that contains digits
+(`Заказ 42`, a price, a date) is treated as data, not as a selector. Such an
+element is matched by its position among elements of the same role instead, and
+the recording says so in its warnings.
+
 ## Steps
 
 - Navigation: `goto`, `back`, `forward`, `reload`

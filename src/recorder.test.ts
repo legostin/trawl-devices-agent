@@ -150,3 +150,28 @@ it("never records a target that would hit several elements on replay", async () 
   expect(await toLocator(probe, target).count()).toBe(1);
   expect(target.name ?? "").not.toContain("\n");
 });
+
+it("prefers wording without digits, and matches by position when the text is data", async () => {
+  const session = await sessions.start(device, { headless: true });
+  const orders = fixture.replace("form.html", "orders.html");
+  const recording = await recorder.start(session.sessionId, orders);
+  const page = sessions.get(session.sessionId).page;
+
+  // Stable wording: the button keeps its name whatever the data does.
+  await page.getByRole("button", { name: "Создать заказ" }).click();
+  await page.waitForTimeout(200);
+  // Data: "Заказ 42 — 9 900 ₸" is this week's number, not a selector.
+  await page.getByRole("link", { name: /Заказ 42/ }).click();
+  await page.waitForTimeout(300);
+
+  const result = await recorder.stop(recording.id, {});
+  const clicks = result.steps.filter((s) => s.action === "click");
+  const [button, order] = clicks.map((s) => s.args[0] as Record<string, unknown>);
+
+  expect(button).toEqual({ role: "button", name: "Создать заказ" });
+
+  // The order link must not be pinned to today's number.
+  expect(JSON.stringify(order)).not.toContain("42");
+  expect(order).toMatchObject({ role: "link", nth: 1 });
+  expect(result.warnings.some((w) => w.includes("matched by position"))).toBe(true);
+});

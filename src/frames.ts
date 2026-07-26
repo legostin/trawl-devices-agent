@@ -61,27 +61,34 @@ export async function captureFrames(page: Page, dir: string, fps: number): Promi
   let stopped = false;
   let inFlight: Promise<void> = Promise.resolve();
 
+  const shoot = async (): Promise<void> => {
+    if (stopped || page.isClosed()) return;
+    const file = path.join(dir, `${String(index).padStart(5, "0")}.jpg`);
+    try {
+      await page.screenshot({ path: file, type: "jpeg", quality: 60, timeout: interval * 4 });
+      index += 1;
+    } catch {
+      // A screenshot can fail mid-navigation; the next tick tries again.
+    }
+  };
+
+  // A run shorter than one interval would otherwise record nothing at all.
+  inFlight = shoot();
+
   const timer = setInterval(() => {
     if (stopped) return;
-    inFlight = inFlight.then(async () => {
-      if (stopped || page.isClosed()) return;
-      const file = path.join(dir, `${String(index).padStart(5, "0")}.jpg`);
-      try {
-        await page.screenshot({ path: file, type: "jpeg", quality: 60, timeout: interval * 4 });
-        index += 1;
-      } catch {
-        // A screenshot can fail mid-navigation; the next tick tries again.
-      }
-    });
+    inFlight = inFlight.then(shoot);
   }, interval);
   timer.unref?.();
 
   return {
     count: () => index,
     stop: async () => {
-      stopped = true;
       clearInterval(timer);
       await inFlight;
+      // One last frame: the end state is the one you look at first.
+      await shoot();
+      stopped = true;
       return { count: index, fps };
     },
   };
