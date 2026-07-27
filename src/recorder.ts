@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { AgentError, type StepRecord, type TargetSpec } from "./types.js";
-import { SessionStore } from "./sessions.js";
+import { SessionStore, type LiveSession } from "./sessions.js";
 import { generate } from "./codegen.js";
 import { writeScript } from "./workspace.js";
 import { RECORDER_SOURCE } from "./recorderInject.js";
@@ -73,6 +73,11 @@ const MAX_ALTERNATIVES = 2;
 
 export class RecorderStore {
   private readonly recordings = new Map<string, Recording>();
+  /** Sessions already wired for recording: a binding can only be exposed once
+   *  per context, so a second recording must reuse it, not re-register it. */
+  private readonly wired = new Set<string>();
+  /** Which recording a session's events belong to right now. */
+  private readonly active = new Map<string, Recording>();
 
   constructor(private readonly deps: RecorderDeps) {}
 
@@ -95,7 +100,34 @@ export class RecorderStore {
       pending: [],
     };
 
+    this.active.set(sessionId, recording);
+
+    if (!this.wired.has(sessionId)) {
+      this.wired.add(sessionId);
+      await this.wire(sessionId, session);
+    }
+
+    this.deps.sessions.setState(sessionId, "recording");
+    if (url) {
+      await session.page.goto(url);
+    } else {
+      // Recording a fragment of a session already in progress: install into the
+      // live page instead of reloading, which would throw away where the human
+      // has got to — the whole point of starting here rather than at the login.
+      await session.page.evaluate(RECORDER_SOURCE).catch(async () => {
+        await session.page.reload();
+      });
+    }
+
+    this.recordings.set(recording.id, recording);
+    return recording;
+  }
+
+  /** Binding and listeners, installed once per session. */
+  private async wire(sessionId: string, session: LiveSession): Promise<void> {
     await session.context.exposeBinding("__trawlRec", async (_source, raw: RawEvent) => {
+      const recording = this.active.get(sessionId);
+      if (!recording) return; // events after a stop belong to nobody
       const [primary, ...rest] = raw.targets ?? [];
       if (!primary) {
         recording.warnings.push(
@@ -124,6 +156,8 @@ export class RecorderStore {
     // Addresses the human opens are steps too: without them a replay has no
     // idea where to start.
     session.page.on("framenavigated", (frame) => {
+      const recording = this.active.get(sessionId);
+      if (!recording) return;
       if (frame !== session.page.mainFrame()) return;
       const url = frame.url();
       if (!isRecordableUrl(url) || url === recording.lastUrl) return;
@@ -133,21 +167,6 @@ export class RecorderStore {
       if (Date.now() - recording.lastStepAt < NAVIGATION_GRACE_MS) return;
       this.record(recording, { ts: Date.now(), action: "goto", args: [url] });
     });
-
-    this.deps.sessions.setState(sessionId, "recording");
-    if (url) {
-      await session.page.goto(url);
-    } else {
-      // Recording a fragment of a session already in progress: install into the
-      // live page instead of reloading, which would throw away where the human
-      // has got to — the whole point of starting here rather than at the login.
-      await session.page.evaluate(RECORDER_SOURCE).catch(async () => {
-        await session.page.reload();
-      });
-    }
-
-    this.recordings.set(recording.id, recording);
-    return recording;
   }
 
   /**
@@ -182,6 +201,7 @@ export class RecorderStore {
     await session.page.waitForTimeout(150);
 
     this.recordings.delete(id);
+    this.active.delete(recording.sessionId);
     // The window stays open on purpose: you often want to keep clicking around
     // after stopping, and a run decides for itself whether to close it.
     if (options.closeSession === true) await this.deps.sessions.stop(recording.sessionId);

@@ -225,3 +225,25 @@ it("records a fragment of a session in progress, without reloading it", async ()
   // Only what happened after the recording started.
   expect(result.steps.map((s) => s.action)).toEqual(["click"]);
 });
+
+it("records again in a session that has already been recorded once", async () => {
+  const session = await sessions.start(device, { headless: true });
+  const page = sessions.get(session.sessionId).page;
+
+  const first = await recorder.start(session.sessionId, fixture);
+  await page.getByTestId("submit").click();
+  await page.waitForTimeout(300);
+  const one = await recorder.stop(first.id, {});
+  expect(one.steps.map((s) => s.action)).toContain("click");
+
+  // The second recording in the same browser — the case that produced a file
+  // with nothing but the header comment in it.
+  const second = await recorder.start(session.sessionId);
+  await page.getByLabel("Email").fill("second@example.com");
+  await page.getByTestId("submit").click();
+  await page.waitForTimeout(400);
+  const two = await recorder.stop(second.id, {});
+
+  expect(two.steps.map((s) => s.action)).toEqual(["fill", "click"]);
+  expect(two.code).toContain("second@example.com");
+});
