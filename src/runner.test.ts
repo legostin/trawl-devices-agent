@@ -145,3 +145,38 @@ it("groups nested steps under step(name)", async () => {
     ["expectVisible", "open"],
   ]);
 });
+
+it("holds a run between steps and carries on where it stopped", async () => {
+  const runner = new Runner({ sessions, workspace: root, trawlProxyPort: 8080 });
+  const started = await runner.start({
+    code: `goto('data:text/html,<h1>one</h1>')\nsleep(200)\nsleep(200)\nsleep(200)\nexpectText({ css: 'h1' }, 'one')\n`,
+    device,
+    env: {},
+    secrets: {},
+  });
+
+  // The browser is reachable while the run holds it — that is the point of
+  // pausing: to look, to click by hand, to record what was missing. It appears
+  // once the browser is actually up, which is not instant.
+  for (let i = 0; i < 100 && !runner.get(started.runId)!.sessionId; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  expect(runner.get(started.runId)!.sessionId).toBeTruthy();
+  expect(runner.setPaused(started.runId, true)).toBe(true);
+
+  await new Promise((r) => setTimeout(r, 600));
+  const held = runner.get(started.runId)!;
+  expect(held.status).toBe("running");
+  expect(held.paused).toBe(true);
+  const stepsWhileHeld = held.steps.length;
+  await new Promise((r) => setTimeout(r, 500));
+  expect(runner.get(started.runId)!.steps.length).toBe(stepsWhileHeld);
+
+  runner.setPaused(started.runId, false);
+  let report = runner.get(started.runId)!;
+  for (let i = 0; i < 100 && report.status === "running"; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    report = runner.get(started.runId)!;
+  }
+  expect(report.status).toBe("passed");
+});

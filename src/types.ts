@@ -107,6 +107,8 @@ export interface RunReport {
   script: string | null;
   device: string;
   status: "running" | "passed" | "failed" | "error";
+  /** Held between steps; the browser sits exactly where the scenario left it. */
+  paused?: boolean;
   startedAt: number;
   durationMs: number;
   steps: StepResult[];

@@ -165,6 +165,14 @@ export function buildRoutes(deps: RouteDeps): Route[] {
       },
     },
     { method: "DELETE", path: "/runs/:id", handler: async (_r, p) => ({ cancelled: runner.cancel(p.id!) }) },
+    {
+      method: "POST",
+      path: "/runs/:id/pause",
+      handler: async (_r, p, b) => {
+        const paused = body<{ paused?: boolean }>(b ?? {}).paused !== false;
+        return { paused: runner.setPaused(p.id!, paused) && paused };
+      },
+    },
 
     {
       method: "POST",
@@ -188,6 +196,11 @@ export function buildRoutes(deps: RouteDeps): Route[] {
       },
     },
     { method: "GET", path: "/record/:id", handler: async (_r, p) => recorder.get(p.id!) },
+    {
+      method: "POST",
+      path: "/record/:id/pause",
+      handler: async (_r, p, b) => recorder.setPaused(p.id!, body<{ paused?: boolean }>(b ?? {}).paused !== false),
+    },
     {
       method: "POST",
       path: "/record/:id/stop",

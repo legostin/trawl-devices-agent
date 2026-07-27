@@ -22,6 +22,8 @@ export interface Recording {
   lastUrl: string | null;
   /** Steps kept in page-event order; `steps` is rebuilt from this. */
   pending: PendingStep[];
+  /** Clicks are being ignored, but the recording is still open. */
+  paused: boolean;
 }
 
 /** A navigation this soon after a recorded action is that action's consequence. */
@@ -156,6 +158,7 @@ export class RecorderStore {
       lastStepAt: 0,
       lastUrl: null,
       pending: [],
+      paused: false,
     };
 
     this.active.set(sessionId, recording);
@@ -179,6 +182,23 @@ export class RecorderStore {
 
     this.recordings.set(recording.id, recording);
     return recording;
+  }
+
+  /**
+   * Stop taking clicks without ending the recording. What happens while paused
+   * — a detour, a captcha, fixing a typo — is not part of the scenario, and
+   * having to end the recording to do it is what makes people re-record.
+   */
+  async setPaused(id: string, paused: boolean): Promise<{ paused: boolean }> {
+    const recording = this.get(id);
+    const session = this.deps.sessions.get(recording.sessionId);
+    const state = await session.page.evaluate((command) => {
+      const control = (window as unknown as { __trawlRecorderControl?: (c: string) => { paused: boolean } })
+        .__trawlRecorderControl;
+      return control ? control(command) : null;
+    }, paused ? "pause" : "resume");
+    recording.paused = state?.paused ?? paused;
+    return { paused: recording.paused };
   }
 
   /** Binding and listeners, installed once per session. */

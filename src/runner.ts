@@ -44,6 +44,8 @@ export interface StartRunInput {
 interface RunState {
   report: RunReport;
   cancelled: boolean;
+  /** Held between steps, not inside one: a half-done click is nobody's friend. */
+  paused: boolean;
 }
 
 const DEFAULT_TIMEOUT = 15_000;
@@ -75,6 +77,19 @@ export class Runner {
     return true;
   }
 
+  /**
+   * Hold the run between steps. The browser stays exactly where it is, which is
+   * what makes it possible to look, to click something by hand, or to record
+   * the steps the scenario turned out to be missing.
+   */
+  setPaused(runId: string, paused: boolean): boolean {
+    const state = this.runs.get(runId);
+    if (!state || state.report.status !== "running") return false;
+    state.paused = paused;
+    state.report.paused = paused;
+    return true;
+  }
+
   /** Starts the run in the background and returns the initial report. */
   async start(input: StartRunInput): Promise<RunReport> {
     const runId = `r_${randomBytes(4).toString("hex")}`;
@@ -89,7 +104,7 @@ export class Runner {
       artifacts: { trace: null, video: null },
       warnings: [],
     };
-    const state: RunState = { report, cancelled: false };
+    const state: RunState = { report, cancelled: false, paused: false };
     this.runs.set(runId, state);
     void this.execute(input, state).catch((err) => {
       state.report.status = "error";
@@ -117,6 +132,9 @@ export class Runner {
         );
 
     this.deps.sessions.setState(session.sessionId, "running");
+    // Published while the run is still going: pausing it is only useful if you
+    // can then reach the browser it is holding.
+    report.sessionId = session.sessionId;
     const page = session.page;
     const traceOn = input.device.trace !== "off";
     if (traceOn) await session.context.tracing.start({ screenshots: true, snapshots: true });
@@ -193,6 +211,8 @@ export class Runner {
     const tracked =
       <A extends unknown[], R>(action: string, body: (...args: A) => Promise<R>) =>
       async (...rawArgs: A): Promise<R> => {
+        // Between steps, never inside one: a half-done click is nobody's friend.
+        while (state.paused && !state.cancelled) await page.waitForTimeout(200);
         const args = rawArgs.map((a) => interpolate(a, currentEnv)) as A;
         const step = beginStep(action, args);
         try {
@@ -607,6 +627,8 @@ export class Runner {
       const keepForInspection = finalStatus !== "passed" && !input.device.closeOnFailure;
       if (ownSession && closeAfterRun && !keepForInspection) {
         await this.deps.sessions.stop(session.sessionId);
+        // It was published while the run held it; the window is gone now.
+        delete report.sessionId;
       } else {
         this.deps.sessions.setState(session.sessionId, "idle");
         report.sessionId = session.sessionId; // the window is still on screen

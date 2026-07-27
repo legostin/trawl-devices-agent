@@ -339,3 +339,25 @@ it("names a button by its title when it has nothing else", async () => {
   const click = result.steps.find((s) => s.action === "click")!;
   expect(click.args[0]).toBe("controls fixture › Добавить фото");
 });
+
+it("pauses without ending the recording, and picks up where it left off", async () => {
+  const session = await sessions.start(device, { headless: true });
+  const recording = await recorder.start(session.sessionId, controls);
+  const page = sessions.get(session.sessionId).page;
+
+  await page.locator("#icon-glyph").click();
+  await page.waitForTimeout(200);
+
+  expect(await recorder.setPaused(recording.id, true)).toEqual({ paused: true });
+  // A detour, a captcha, fixing a typo — none of it belongs in the scenario.
+  await page.locator("#titled-glyph").click();
+  await page.waitForTimeout(200);
+
+  expect(await recorder.setPaused(recording.id, false)).toEqual({ paused: false });
+  await page.locator("#agree-text").click();
+  await page.waitForTimeout(200);
+
+  const result = await recorder.stop(recording.id, {});
+  expect(result.steps.map((s) => s.action)).toEqual(["goto", "click", "check"]);
+  expect(JSON.stringify(result.steps)).not.toContain("Добавить фото");
+});
