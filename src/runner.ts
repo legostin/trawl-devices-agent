@@ -11,6 +11,11 @@ import { TrafficBuffer, describeMatcher, parseMatcher, type MatcherObject } from
 import { interpolate } from "./interpolate.js";
 import { makeMasker } from "./mask.js";
 import { captureFrames, installCursor, type FrameCapture } from "./frames.js";
+import { MapStore } from "./mapStore.js";
+import { currentScreen } from "./mapScreens.js";
+import { findScreen, resolveName } from "./mapResolve.js";
+import { locateEntry } from "./mapLocate.js";
+import type { AppMap } from "./mapTypes.js";
 
 export interface RunnerDeps {
   sessions: SessionStore;
@@ -137,6 +142,18 @@ export class Runner {
     let current: StepResult | null = null;
     let currentName: string | undefined;
 
+    const map: AppMap = await new MapStore(this.deps.workspace).load();
+    // Which screen we are on is recomputed only when the url moved: it is used
+    // to scope unqualified names, and probing a marker costs a round trip.
+    let screenUrl: string | null = null;
+    let screenId: string | null = null;
+    const screenNow = async (): Promise<string | null> => {
+      if (page.url() === screenUrl) return screenId;
+      screenUrl = page.url();
+      screenId = (await currentScreen(page, map.screens, HEAL_PROBE_MS))?.id ?? null;
+      return screenId;
+    };
+
     const traffic = new TrafficBuffer();
     const detachTraffic = await TrafficBuffer.attach(
       session.context,
@@ -214,7 +231,14 @@ export class Runner {
      * A markup change that only breaks the primary should cost a warning, not
      * the run — but it is written into the report, never swallowed.
      */
-    const find = async (target: TargetSpec): Promise<Locator> => {
+    const find = async (target: TargetSpec | string, value?: string): Promise<Locator> => {
+      // A string is a reference into the map: the scenario says what it wants,
+      // the map knows where it is.
+      if (typeof target === "string") {
+        const found = resolveName(map, target, await screenNow());
+        if (current) current.screen = found.screen.label;
+        return locateEntry(page, found, value, Math.min(timeout, HEAL_PROBE_MS));
+      }
       const resolved = await resolveTarget(page, target, Math.min(timeout, HEAL_PROBE_MS));
       if (resolved.index > 0) {
         const step = current;
@@ -269,45 +293,71 @@ export class Runner {
         await page.reload({ timeout });
       }),
 
-      click: tracked("click", async (t: TargetSpec) => {
+      /** Go to a screen by its map label. `match` has wildcards and is not navigable. */
+      open: tracked("open", async (label: string) => {
+        const target = findScreen(map, label);
+        if (target.open?.url) {
+          await page.goto(url(target.open.url), { timeout });
+          return;
+        }
+        if (target.open?.flow) {
+          await (scope.run as (relPath: string) => Promise<void>)(target.open.flow);
+          return;
+        }
+        throw new AgentError(
+          "script",
+          `у экрана «${target.label}» не задано, как на него попасть — добавьте open.url или open.flow`,
+        );
+      }),
+
+      click: tracked("click", async (t: TargetSpec | string) => {
         await (await find(t)).click({ timeout });
       }),
-      dblclick: tracked("dblclick", async (t: TargetSpec) => {
+      dblclick: tracked("dblclick", async (t: TargetSpec | string) => {
         await (await find(t)).dblclick({ timeout });
       }),
-      fill: tracked("fill", async (t: TargetSpec, v: string) => {
+      fill: tracked("fill", async (t: TargetSpec | string, v: string) => {
         await (await find(t)).fill(v, { timeout });
       }),
-      type: tracked("type", async (t: TargetSpec, v: string) => {
+      type: tracked("type", async (t: TargetSpec | string, v: string) => {
         await (await find(t)).pressSequentially(v, { timeout });
       }),
-      press: tracked("press", async (t: TargetSpec | null, key: string) => {
+      press: tracked("press", async (t: TargetSpec | string | null, key: string) => {
         if (t) await (await find(t)).press(key, { timeout });
         else await page.keyboard.press(key);
       }),
-      check: tracked("check", async (t: TargetSpec) => {
+      check: tracked("check", async (t: TargetSpec | string) => {
         await (await find(t)).check({ timeout });
       }),
-      uncheck: tracked("uncheck", async (t: TargetSpec) => {
+      uncheck: tracked("uncheck", async (t: TargetSpec | string) => {
         await (await find(t)).uncheck({ timeout });
       }),
-      select: tracked("select", async (t: TargetSpec, v: string) => {
+      select: tracked("select", async (t: TargetSpec | string, v: string) => {
+        // A named choice is a set of radios or list items, not a <select>: the
+        // option was already narrowed by value, so activating it is the action.
+        if (typeof t === "string") {
+          const option = await find(t, v);
+          const type = await option.evaluate((node) => (node as HTMLInputElement).type ?? "");
+          if (type === "radio" || type === "checkbox") await option.check({ timeout });
+          else await option.click({ timeout });
+          return;
+        }
         await (await find(t)).selectOption(v, { timeout });
       }),
-      hover: tracked("hover", async (t: TargetSpec) => {
+      hover: tracked("hover", async (t: TargetSpec | string) => {
         await (await find(t)).hover({ timeout });
       }),
-      upload: tracked("upload", async (t: TargetSpec, file: string) => {
+      upload: tracked("upload", async (t: TargetSpec | string, file: string) => {
         await (await find(t)).setInputFiles(path.resolve(this.deps.workspace, file), { timeout });
       }),
-      drag: tracked("drag", async (from: TargetSpec, to: TargetSpec) => {
+      drag: tracked("drag", async (from: TargetSpec | string, to: TargetSpec | string) => {
         await (await find(from)).dragTo((await find(to)), { timeout });
       }),
-      scrollTo: tracked("scrollTo", async (t: TargetSpec) => {
+      scrollTo: tracked("scrollTo", async (t: TargetSpec | string) => {
         await (await find(t)).scrollIntoViewIfNeeded({ timeout });
       }),
 
-      waitFor: tracked("waitFor", async (t: TargetSpec, stateName: "visible" | "hidden" | "attached" = "visible") => {
+      waitFor: tracked("waitFor", async (t: TargetSpec | string, stateName: "visible" | "hidden" | "attached" = "visible") => {
         await (await find(t)).waitFor({ state: stateName, timeout });
       }),
       waitForUrl: tracked("waitForUrl", async (pattern: string) => {
@@ -317,19 +367,19 @@ export class Runner {
         await page.waitForTimeout(ms);
       }),
 
-      expectVisible: tracked("expectVisible", async (t: TargetSpec) => {
+      expectVisible: tracked("expectVisible", async (t: TargetSpec | string) => {
         await (await find(t)).waitFor({ state: "visible", timeout });
       }),
-      expectHidden: tracked("expectHidden", async (t: TargetSpec) => {
+      expectHidden: tracked("expectHidden", async (t: TargetSpec | string) => {
         await (await find(t)).waitFor({ state: "hidden", timeout });
       }),
-      expectText: tracked("expectText", async (t: TargetSpec, expected: string | RegExp) => {
+      expectText: tracked("expectText", async (t: TargetSpec | string, expected: string | RegExp) => {
         const actual = ((await (await find(t)).textContent({ timeout })) ?? "").trim();
         const matcher = toMatcher(expected as never);
         const ok = isRegExp(matcher) ? matcher.test(actual) : actual === matcher;
         assertThat(ok, `text of ${describeTarget(t)} does not match`, String(matcher), actual);
       }),
-      expectValue: tracked("expectValue", async (t: TargetSpec, expected: string) => {
+      expectValue: tracked("expectValue", async (t: TargetSpec | string, expected: string) => {
         const actual = await (await find(t)).inputValue({ timeout });
         assertThat(actual === expected, `value of ${describeTarget(t)} does not match`, expected, actual);
       }),
@@ -340,11 +390,11 @@ export class Runner {
           throw new AgentError("assertion", "url does not match", { expected: pattern, actual: page.url() });
         }
       }),
-      expectCount: tracked("expectCount", async (t: TargetSpec, expected: number) => {
+      expectCount: tracked("expectCount", async (t: TargetSpec | string, expected: number) => {
         const actual = await (await find(t)).count();
         assertThat(actual === expected, `count of ${describeTarget(t)} does not match`, String(expected), String(actual));
       }),
-      expectAttr: tracked("expectAttr", async (t: TargetSpec, name: string, expected: string) => {
+      expectAttr: tracked("expectAttr", async (t: TargetSpec | string, name: string, expected: string) => {
         const actual = await (await find(t)).getAttribute(name, { timeout });
         assertThat(
           actual === expected,
@@ -409,11 +459,22 @@ export class Runner {
         }
       }),
 
-      getText: tracked("getText", async (t: TargetSpec) => ((await (await find(t)).textContent({ timeout })) ?? "").trim()),
-      getValue: tracked("getValue", async (t: TargetSpec) => (await find(t)).inputValue({ timeout })),
-      getAttr: tracked("getAttr", async (t: TargetSpec, name: string) => (await find(t)).getAttribute(name, { timeout })),
+      /** The assertion the row UI writes: one call, one request, one status. */
+      expectApi: tracked("expectApi", async (matcher: string | MatcherObject, status?: number) => {
+        const hit = await traffic.consume(parseMatcher(matcher), timeout);
+        if (status !== undefined && hit.status !== status) {
+          throw new AgentError("assertion", `status of ${describeMatcher(parseMatcher(matcher))} does not match`, {
+            expected: String(status),
+            actual: String(hit.status),
+          });
+        }
+      }),
+
+      getText: tracked("getText", async (t: TargetSpec | string) => ((await (await find(t)).textContent({ timeout })) ?? "").trim()),
+      getValue: tracked("getValue", async (t: TargetSpec | string) => (await find(t)).inputValue({ timeout })),
+      getAttr: tracked("getAttr", async (t: TargetSpec | string, name: string) => (await find(t)).getAttribute(name, { timeout })),
       getUrl: tracked("getUrl", async () => page.url()),
-      count: tracked("count", async (t: TargetSpec) => (await find(t)).count()),
+      count: tracked("count", async (t: TargetSpec | string) => (await find(t)).count()),
 
       screenshot: tracked("screenshot", async (name?: string) => {
         const file = `${name ?? `shot-${report.steps.length}`}.png`;

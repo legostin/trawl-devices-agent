@@ -49,7 +49,8 @@ const show = (v: unknown): string =>
   isRegexSpec(v) ? `/${v.__regex.source}/${v.__regex.flags}` : isRegExp(v) ? String(v) : JSON.stringify(v);
 
 /** Human-readable target, used in assertion and timeout messages. */
-export function describeTarget(target: TargetSpec): string {
+export function describeTarget(target: TargetSpec | string): string {
+  if (typeof target === "string") return `«${target}»`;
   const parts: string[] = [];
   if (target.testId !== undefined) parts.push(`testId=${target.testId}`);
   if (target.role !== undefined) parts.push(`role=${target.role}`);

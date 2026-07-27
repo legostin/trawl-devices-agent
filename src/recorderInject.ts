@@ -13,6 +13,13 @@ export const RECORDER_SOURCE = String.raw`
 
   const inOverlay = (el) => !!(el && el.closest && el.closest('[data-trawl-overlay]'));
 
+  // A human clicks a button; the event lands on the icon inside it. Recording
+  // the icon produces a css path that breaks on the next redesign.
+  const ACTIONABLE =
+    'button, a[href], [role=button], [role=link], [role=tab], [role=menuitem], [role=option],' +
+    'label, input, select, textarea, summary, [onclick], [tabindex]';
+  const actionable = (el) => (el.closest && el.closest(ACTIONABLE)) || el;
+
   const cssPath = (el) => {
     const parts = [];
     let node = el;
@@ -51,13 +58,28 @@ export const RECORDER_SOURCE = String.raw`
   // textContent (icons, newlines, double spaces) would never match it.
   const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
 
+  const byIds = (value) =>
+    (value || '')
+      .split(/\s+/)
+      .map((id) => document.getElementById(id))
+      .filter(Boolean)
+      .map((node) => norm(node.textContent))
+      .filter(Boolean)
+      .join(' ');
+
+  // The order ARIA specifies, and the one Playwright computes with: an icon
+  // button usually has nothing but a title, and losing it costs us the name.
   const accessibleName = (el) => {
+    const labelledBy = byIds(el.getAttribute('aria-labelledby'));
+    if (labelledBy) return labelledBy;
     const aria = norm(el.getAttribute('aria-label'));
     if (aria) return aria;
     if (el.labels && el.labels[0]) return norm(el.labels[0].textContent);
     const text = norm(el.textContent);
     if (text && text.length <= 60) return text;
-    return norm(el.getAttribute('value'));
+    const value = norm(el.getAttribute('value'));
+    if (value) return value;
+    return norm(el.getAttribute('title'));
   };
 
   const labelText = (el) => (el.labels && el.labels[0] ? norm(el.labels[0].textContent) : '');
@@ -65,6 +87,38 @@ export const RECORDER_SOURCE = String.raw`
   // Text carrying digits is almost always data — an order number, a price, a
   // date, a count. Matching on it records today's data as tomorrow's selector.
   const looksDynamic = (s) => /\d/.test(s);
+
+  const OPTION_ROLES = ['radio', 'checkbox', 'option', 'switch', 'menuitemradio', 'menuitemcheckbox'];
+  const OPTION_CONTAINERS = '[role=radiogroup], [role=listbox], [role=menu], fieldset, select';
+
+  // Inside a closed set of choices, digits are the identity of the option — a
+  // year, a capacity, a power rating. Outside one they are this week's data.
+  const optionLike = (el, role) =>
+    OPTION_ROLES.indexOf(role) >= 0 || !!(el.closest && el.closest(OPTION_CONTAINERS));
+
+  const GROUP_CONTAINERS = '[role=radiogroup], [role=listbox], [role=menu], fieldset, select, [data-field]';
+
+  const groupLabel = (container) => {
+    if (!container) return '';
+    const aria = norm(container.getAttribute('aria-label'));
+    if (aria) return aria;
+    const legend = container.querySelector('legend');
+    if (legend) return norm(legend.textContent);
+    const labelled = byIds(container.getAttribute('aria-labelledby'));
+    if (labelled) return labelled;
+    return norm(container.getAttribute('data-field'));
+  };
+
+  // A year is not seven radio buttons, it is one question with an answer. The
+  // page knows which question; Node cannot work it out from the events alone.
+  const groupOf = (el) => {
+    const role = implicitRole(el);
+    if (!optionLike(el, role)) return null;
+    const container = el.closest(GROUP_CONTAINERS);
+    const key = el.getAttribute('name') || (container ? cssPath(container) : '');
+    if (!key || !container) return null;
+    return { key: key, label: groupLabel(container), targets: verified(container) };
+  };
 
   /** Ordered candidate targets, best first. */
   const candidates = (el) => {
@@ -78,11 +132,15 @@ export const RECORDER_SOURCE = String.raw`
     const placeholder = el.getAttribute('placeholder');
     const own = norm(el.textContent);
 
+    // Wording that carries digits is data — unless this element is one of a
+    // fixed set of choices, where the digits are what the choice *is*.
+    const dataLike = optionLike(el, role) ? () => false : looksDynamic;
+
     // Stable wording first.
-    if (role && name && !looksDynamic(name)) out.push({ role: role, name: name });
-    if (label && !looksDynamic(label)) out.push({ label: label });
-    if (placeholder && !looksDynamic(placeholder)) out.push({ placeholder: placeholder });
-    if (own && own.length <= 40 && !looksDynamic(own)) out.push({ text: own });
+    if (role && name && !dataLike(name)) out.push({ role: role, name: name });
+    if (label && !dataLike(label)) out.push({ label: label });
+    if (placeholder && !dataLike(placeholder)) out.push({ placeholder: placeholder });
+    if (own && own.length <= 40 && !dataLike(own)) out.push({ text: own });
 
     // Then structure: the Node side pins this to the element that was clicked,
     // so "the third row" survives the numbers inside it changing.
@@ -90,10 +148,10 @@ export const RECORDER_SOURCE = String.raw`
 
     // Only then the wording that looks like data. It is marked so the Node side
     // can use it as a last resort without ever saving it as a fallback.
-    if (role && name && looksDynamic(name)) out.push({ role: role, name: name, __dyn: true });
-    if (label && looksDynamic(label)) out.push({ label: label, __dyn: true });
-    if (placeholder && looksDynamic(placeholder)) out.push({ placeholder: placeholder, __dyn: true });
-    if (own && own.length <= 40 && looksDynamic(own)) out.push({ text: own, __dyn: true });
+    if (role && name && dataLike(name)) out.push({ role: role, name: name, __dyn: true });
+    if (label && dataLike(label)) out.push({ label: label, __dyn: true });
+    if (placeholder && dataLike(placeholder)) out.push({ placeholder: placeholder, __dyn: true });
+    if (own && own.length <= 40 && dataLike(own)) out.push({ text: own, __dyn: true });
 
     out.push({ css: cssPath(el) });
     return out;
@@ -169,6 +227,14 @@ export const RECORDER_SOURCE = String.raw`
     return [out[0]].concat(alternatives).map(strip);
   };
 
+  // What names the screen this step happened on. The heading first: a wizard
+  // keeps one document title across every step, but its heading changes.
+  const screenTitle = () => {
+    const heading = document.querySelector('h1');
+    const text = heading ? norm(heading.textContent) : '';
+    return text || norm(document.title);
+  };
+
   const emit = (action, el, args) => {
     if (state.paused) return;
     const found = verified(el);
@@ -178,6 +244,8 @@ export const RECORDER_SOURCE = String.raw`
       action: action,
       action_: action,
       targets: found,
+      group: groupOf(el),
+      title: screenTitle(),
       fallbackCss: cssPath(el),
       args: args || [],
       ts: Date.now(),
@@ -193,20 +261,30 @@ export const RECORDER_SOURCE = String.raw`
   };
 
   document.addEventListener('click', (e) => {
-    const el = e.target;
-    if (!el || inOverlay(el)) return;
+    const raw = e.target;
+    if (!raw || inOverlay(raw)) return;
     flushFill();
     if (state.mode === 'assert') {
       state.mode = 'record';
-      const text = (el.textContent || '').trim();
-      emit(text ? 'expectText' : 'expectVisible', el, text ? [text] : []);
+      // The raw target on purpose: when a human points at a span to assert its
+      // text, that span is what they meant.
+      const text = (raw.textContent || '').trim();
+      emit(text ? 'expectText' : 'expectVisible', raw, text ? [text] : []);
       return;
     }
+    const el = actionable(raw);
     const tag = el.tagName ? el.tagName.toLowerCase() : '';
     const type = (el.getAttribute && (el.getAttribute('type') || '')).toLowerCase();
     if (tag === 'input' && (type === 'checkbox' || type === 'radio')) {
       emit(el.checked ? 'check' : 'uncheck', el, []);
       return;
+    }
+    // Clicking a label makes the browser dispatch a second click on its control,
+    // which arrives here as the check/uncheck above. Recording this one as well
+    // would toggle the box twice on replay.
+    if (tag === 'label' && el.control) {
+      const controlType = (el.control.type || '').toLowerCase();
+      if (controlType === 'checkbox' || controlType === 'radio') return;
     }
     emit('click', el, []);
   }, true);
@@ -214,6 +292,10 @@ export const RECORDER_SOURCE = String.raw`
   document.addEventListener('input', (e) => {
     const el = e.target;
     if (!el || inOverlay(el)) return;
+    const type = (el.getAttribute && (el.getAttribute('type') || '')).toLowerCase();
+    // check/uncheck already recorded the intent; the value here is the option's
+    // own value attribute, never anything a human typed.
+    if (type === 'checkbox' || type === 'radio') return;
     if (el.tagName === 'SELECT') { emit('select', el, [el.value]); return; }
     if (state.pendingFill && state.pendingFill.el !== el) flushFill();
     state.pendingFill = { el: el, value: el.value };

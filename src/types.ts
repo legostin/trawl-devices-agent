@@ -75,6 +75,8 @@ export interface StepRecord {
   args: unknown[];
   /** Set by step(name, fn) for the steps nested inside it. */
   name?: string;
+  /** The recorded section this step belongs to; printed as a step() block. */
+  section?: string;
 }
 
 export interface FlowRef {
@@ -86,6 +88,8 @@ export interface FlowRef {
 export interface StepResult extends StepRecord {
   /** 1-based line in the script this step came from, when it can be known. */
   line?: number;
+  /** The map screen this step ran on, when the map knows it. */
+  screen?: string;
   status: "passed" | "failed" | "skipped";
   startedAt: number;
   durationMs: number;

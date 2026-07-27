@@ -32,7 +32,22 @@ export interface GenerateOptions {
 export function generate(steps: StepRecord[], options: GenerateOptions = {}): string {
   const line = (s: StepRecord) => `${s.action}(${s.args.map(formatArg).join(", ")})`;
   const setup = steps.filter((s) => SETUP.has(s.action)).map(line);
-  const body = steps.filter((s) => !SETUP.has(s.action)).map(line);
+
+  // Sections come from where the recording changed screen. They are printed as
+  // step() blocks because the DSL already has one and the report already groups
+  // by it — no new syntax buys the same thing.
+  const body: string[] = [];
+  let section: string | undefined;
+  for (const s of steps) {
+    if (SETUP.has(s.action)) continue;
+    if (s.section !== section) {
+      if (section !== undefined) body.push("})");
+      section = s.section;
+      if (section !== undefined) body.push(`step(${formatArg(section)}, () => {`);
+    }
+    body.push(section === undefined ? line(s) : `  ${line(s)}`);
+  }
+  if (section !== undefined) body.push("})");
 
   const chunks: string[] = [];
   if (options.header) chunks.push(`// ${options.header}`);

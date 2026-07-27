@@ -3,7 +3,7 @@ export const STEP_NAMES = [
   // setup
   "device", "use",
   // navigation
-  "goto", "back", "forward", "reload",
+  "goto", "back", "forward", "reload", "open",
   // actions
   "click", "dblclick", "fill", "type", "press", "check", "uncheck",
   "select", "hover", "upload", "drag", "scrollTo",
@@ -13,7 +13,7 @@ export const STEP_NAMES = [
   "expectVisible", "expectHidden", "expectText", "expectValue",
   "expectUrl", "expectCount", "expectAttr",
   // HTTP assertions
-  "expectRequest", "expectResponse", "expectNoRequest",
+  "expectRequest", "expectResponse", "expectNoRequest", "expectApi",
   // reads
   "getText", "getValue", "getAttr", "getUrl", "count",
   // composition
