@@ -69,3 +69,17 @@ it("a second recording reuses the entries the first one made", async () => {
   expect(Object.keys(map.screens[0]!.elements)).toHaveLength(1);
   expect(result.map.elements).toBe(0);
 });
+
+it("records how to get back to the screen, so a fragment can replay on its own", async () => {
+  const session = await sessions.start(device, { headless: true });
+  const recording = await recorder.start(session.sessionId, choices);
+  const page = sessions.get(session.sessionId).page;
+  await page.getByRole("button", { name: "Подать объявление" }).click();
+  await page.waitForTimeout(300);
+  await recorder.stop(recording.id, {});
+
+  // Without this open('Экран') has nothing to navigate to, and a recording that
+  // began wherever the human already was can never start itself.
+  const map = await new MapStore(root).load();
+  expect(map.screens[0]!.open?.url).toBe(choices);
+});

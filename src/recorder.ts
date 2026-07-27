@@ -5,7 +5,7 @@ import { generate } from "./codegen.js";
 import { writeScript } from "./workspace.js";
 import { RECORDER_SOURCE } from "./recorderInject.js";
 import { MapStore, slug } from "./mapStore.js";
-import { matchesScreen } from "./mapScreens.js";
+import { matchesScreen, screenPatternFor } from "./mapScreens.js";
 import { collapse, type CollapsedStep, type GroupInfo } from "./mapCollapse.js";
 import { reconcile, type Observation } from "./mapReconcile.js";
 import type { AppMap } from "./mapTypes.js";
@@ -98,17 +98,21 @@ const screenFor = (
   map: AppMap,
   url: string,
   title: string,
-): { id: string; label: string; match: { url: string } } => {
+): { id: string; label: string; match: { url: string }; open: { url: string } } => {
   const known = map.screens.find((s) => matchesScreen(s, url));
-  if (known) return { id: known.id, label: known.label, match: known.match as { url: string } };
-  let pathname = "/";
-  try {
-    pathname = new URL(url).pathname;
-  } catch {
-    // a file:// fixture or an opaque url — the title still names it
+  if (known) {
+    return {
+      id: known.id,
+      label: known.label,
+      match: known.match as { url: string },
+      open: known.open?.url ? { url: known.open.url } : { url },
+    };
   }
-  const label = title.trim() || pathname;
-  return { id: slug(label), label, match: { url: `**${pathname}` } };
+  const label = title.trim() || screenPatternFor(url);
+  // The address that was actually open is how to get back here — without it
+  // open('Экран') has nothing to navigate to, and a fragment recording, which
+  // starts wherever the human already was, can never replay on its own.
+  return { id: slug(label), label, match: { url: screenPatternFor(url) }, open: { url } };
 };
 
 /**
@@ -298,6 +302,7 @@ export class RecorderStore {
         screenId: where.id,
         screenLabel: where.label,
         screenMatch: where.match,
+        screenOpen: where.open.url,
         label: isChoice ? String(step.args[0]) : labelOf(targets),
         kind: isChoice ? "choice" : "control",
         targets,

@@ -6,6 +6,8 @@ export interface Observation {
   screenId: string;
   screenLabel: string;
   screenMatch: ScreenMatch;
+  /** The address that was open — how a scenario gets back to this screen. */
+  screenOpen?: string;
   /** Empty when the element had no readable name — that goes to review. */
   label: string;
   kind: ElementKind;
@@ -45,12 +47,19 @@ const looksLikeSame = (entry: ElementEntry, candidate: TargetSpec): boolean => {
 
 const ensureScreen = (map: AppMap, observation: Observation): ScreenFile => {
   const existing = map.screens.find((s) => s.id === observation.screenId);
-  if (existing) return existing;
+  if (existing) {
+    // A screen recorded before open() existed has no way in; fill it once seen.
+    if (!existing.open?.url && !existing.open?.flow && observation.screenOpen) {
+      existing.open = { url: observation.screenOpen };
+    }
+    return existing;
+  }
   const screen: ScreenFile = {
     version: 1,
     id: observation.screenId,
     label: observation.screenLabel,
     match: observation.screenMatch,
+    ...(observation.screenOpen ? { open: { url: observation.screenOpen } } : {}),
     elements: {},
   };
   map.screens.push(screen);

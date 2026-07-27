@@ -5,6 +5,23 @@ import type { ScreenFile } from "./mapTypes.js";
 const ESCAPE = /[.+^${}()|[\]\\]/g;
 
 /** `*` stays inside a path segment, `**` crosses them — the shape people expect. */
+const ID_SEGMENT = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{16,})$/i;
+
+/**
+ * The pattern that recognises the screen this url belongs to: host and path
+ * exactly, with identifiers in the path turned into wildcards. `/a/new/87031015`
+ * and `/a/new/87031016` are one screen, not two.
+ */
+export function screenPatternFor(url: string): string {
+  const { path } = splitUrl(url);
+  const at = path.indexOf("://");
+  const head = at < 0 ? "" : path.slice(0, at + 3);
+  const rest = at < 0 ? path : path.slice(at + 3);
+  const [host, ...segments] = rest.split("/");
+  const templated = segments.map((s) => (ID_SEGMENT.test(s) ? "*" : s));
+  return head + [host, ...templated].join("/");
+}
+
 export function globToRegExp(pattern: string): RegExp {
   const body = pattern
     .replace(ESCAPE, "\\$&")
@@ -15,9 +32,17 @@ export function globToRegExp(pattern: string): RegExp {
   return new RegExp(`^${body}$`);
 }
 
-const splitHash = (url: string): { path: string; hash: string } => {
-  const at = url.indexOf("#");
-  return at < 0 ? { path: url, hash: "" } : { path: url.slice(0, at), hash: url.slice(at) };
+/**
+ * The query belongs to the data, not to the identity of the screen: the same
+ * form is the same form whether or not it carries `?destination=…`. The hash is
+ * kept apart because in an SPA it often *is* the route.
+ */
+const splitUrl = (url: string): { path: string; hash: string } => {
+  const hashAt = url.indexOf("#");
+  const hash = hashAt < 0 ? "" : url.slice(hashAt);
+  const head = hashAt < 0 ? url : url.slice(0, hashAt);
+  const queryAt = head.indexOf("?");
+  return { path: queryAt < 0 ? head : head.slice(0, queryAt), hash };
 };
 
 /**
@@ -26,7 +51,7 @@ const splitHash = (url: string): { path: string; hash: string } => {
  */
 export function matchesScreen(screen: ScreenFile, url: string): boolean {
   if (!screen.match) return false;
-  const { path, hash } = splitHash(url);
+  const { path, hash } = splitUrl(url);
   if (screen.match.url && !globToRegExp(screen.match.url).test(path)) return false;
   if (screen.match.hash && !globToRegExp(screen.match.hash).test(hash)) return false;
   return Boolean(screen.match.url || screen.match.hash);
