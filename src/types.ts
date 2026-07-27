@@ -86,6 +86,8 @@ export interface FlowRef {
 export interface StepResult extends StepRecord {
   /** 1-based line in the script this step came from, when it can be known. */
   line?: number;
+  /** The map screen this step ran on, when the map knows it. */
+  screen?: string;
   status: "passed" | "failed" | "skipped";
   startedAt: number;
   durationMs: number;
