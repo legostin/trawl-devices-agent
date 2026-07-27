@@ -4,6 +4,7 @@ import { SessionStore, type LiveSession } from "./sessions.js";
 import { generate } from "./codegen.js";
 import { writeScript } from "./workspace.js";
 import { RECORDER_SOURCE } from "./recorderInject.js";
+import type { GroupInfo } from "./mapCollapse.js";
 
 export interface Recording {
   id: string;
@@ -41,6 +42,8 @@ interface RawEvent {
   action: string;
   /** Verified in the page, best first — see recorderInject. */
   targets: TargetSpec[];
+  /** Set when the element is one option of a fixed set — see mapCollapse. */
+  group?: GroupInfo | null;
   /** Used only when nothing verified: better a brittle path than no step. */
   fallbackCss: string;
   args: unknown[];
@@ -53,6 +56,9 @@ interface PendingStep {
   ts: number;
   action: string;
   args: unknown[];
+  group?: GroupInfo;
+  /** The page url when the step happened — sections are cut on it. */
+  url?: string;
 }
 
 const MARK = "data-trawl-rec-el";
@@ -149,7 +155,13 @@ export class RecorderStore {
         );
       }
 
-      this.record(recording, { ts: raw.ts, action: raw.action, args: [target, ...raw.args] });
+      this.record(recording, {
+        ts: raw.ts,
+        action: raw.action,
+        args: [target, ...raw.args],
+        url: session.page.url(),
+        ...(raw.group ? { group: raw.group } : {}),
+      });
     });
     await session.context.addInitScript(RECORDER_SOURCE);
 

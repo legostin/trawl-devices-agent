@@ -96,6 +96,30 @@ export const RECORDER_SOURCE = String.raw`
   const optionLike = (el, role) =>
     OPTION_ROLES.indexOf(role) >= 0 || !!(el.closest && el.closest(OPTION_CONTAINERS));
 
+  const GROUP_CONTAINERS = '[role=radiogroup], [role=listbox], [role=menu], fieldset, select, [data-field]';
+
+  const groupLabel = (container) => {
+    if (!container) return '';
+    const aria = norm(container.getAttribute('aria-label'));
+    if (aria) return aria;
+    const legend = container.querySelector('legend');
+    if (legend) return norm(legend.textContent);
+    const labelled = byIds(container.getAttribute('aria-labelledby'));
+    if (labelled) return labelled;
+    return norm(container.getAttribute('data-field'));
+  };
+
+  // A year is not seven radio buttons, it is one question with an answer. The
+  // page knows which question; Node cannot work it out from the events alone.
+  const groupOf = (el) => {
+    const role = implicitRole(el);
+    if (!optionLike(el, role)) return null;
+    const container = el.closest(GROUP_CONTAINERS);
+    const key = el.getAttribute('name') || (container ? cssPath(container) : '');
+    if (!key || !container) return null;
+    return { key: key, label: groupLabel(container), targets: verified(container) };
+  };
+
   /** Ordered candidate targets, best first. */
   const candidates = (el) => {
     const out = [];
@@ -212,6 +236,7 @@ export const RECORDER_SOURCE = String.raw`
       action: action,
       action_: action,
       targets: found,
+      group: groupOf(el),
       fallbackCss: cssPath(el),
       args: args || [],
       ts: Date.now(),
