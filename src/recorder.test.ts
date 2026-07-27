@@ -178,3 +178,31 @@ it("prefers wording without digits, and matches by position when the text is dat
   expect(order).toMatchObject({ role: "link", nth: 1 });
   expect(result.warnings.some((w) => w.includes("matched by position"))).toBe(true);
 });
+
+it("records a navigating click before the navigation it causes, with a real target", async () => {
+  // The exact shape that broke on kolesa.kz: a header link that leaves the page.
+  const session = await sessions.start(device, { headless: true });
+  const index = fixture.replace("form.html", "index.html");
+  const recording = await recorder.start(session.sessionId, index);
+  const page = sessions.get(session.sessionId).page;
+
+  await page.getByRole("link", { name: "Open the form" }).click();
+  await page.waitForTimeout(600);
+  const result = await recorder.stop(recording.id, {});
+
+  const actions = result.steps.map((s) => s.action);
+  const clickAt = actions.indexOf("click");
+  expect(clickAt).toBeGreaterThanOrEqual(0);
+
+  // The click must come before any goto that follows it — otherwise the replay
+  // opens the destination and then hunts for the link that took it there.
+  const gotoAfter = actions.slice(clickAt + 1).includes("goto");
+  const gotoBefore = actions.slice(0, clickAt).lastIndexOf("goto");
+  expect(gotoBefore).toBeLessThan(clickAt);
+  expect(gotoAfter).toBe(false);
+
+  // And the target is a real locator, not a css path scraped after the fact.
+  const target = result.steps[clickAt]!.args[0] as Record<string, unknown>;
+  expect(target).toMatchObject({ role: "link", name: "Open the form" });
+  expect(target.css).toBeUndefined();
+});

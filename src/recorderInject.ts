@@ -9,7 +9,7 @@ export const RECORDER_SOURCE = String.raw`
   window.__trawlRecorderInstalled = true;
 
   const MARK = 'data-trawl-rec-el';
-  const state = { paused: false, mode: 'record', pendingFill: null };
+  const state = { paused: false, mode: 'record', pendingFill: null, seq: 0 };
 
   const inOverlay = (el) => !!(el && el.closest && el.closest('[data-trawl-overlay]'));
 
@@ -99,12 +99,90 @@ export const RECORDER_SOURCE = String.raw`
     return out;
   };
 
+  // ---- in-page verification -------------------------------------------------
+  // Candidates must be checked here, synchronously, while the element is still
+  // on screen: a click that navigates takes the page away long before Node
+  // could ask Playwright anything.
+
+  const ROLE_SELECTOR = {
+    button: 'button, input[type=submit], input[type=button], [role=button]',
+    link: 'a[href], [role=link]',
+    textbox: 'input:not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]), textarea, [role=textbox]',
+    checkbox: 'input[type=checkbox], [role=checkbox]',
+    radio: 'input[type=radio], [role=radio]',
+    combobox: 'select, [role=combobox]',
+  };
+
+  const matchesFor = (candidate) => {
+    if (candidate.testId) {
+      return [...document.querySelectorAll(
+        '[data-testid=' + JSON.stringify(candidate.testId) + '],' +
+        '[data-test-id=' + JSON.stringify(candidate.testId) + '],' +
+        '[data-qa=' + JSON.stringify(candidate.testId) + ']',
+      )];
+    }
+    if (candidate.css) {
+      try { return [...document.querySelectorAll(candidate.css)]; } catch { return []; }
+    }
+    if (candidate.role) {
+      const selector = ROLE_SELECTOR[candidate.role] || '[role=' + JSON.stringify(candidate.role) + ']';
+      let pool;
+      try { pool = [...document.querySelectorAll(selector)]; } catch { return []; }
+      if (candidate.name === undefined) return pool;
+      return pool.filter((el) => accessibleName(el) === candidate.name);
+    }
+    if (candidate.label) {
+      return [...document.querySelectorAll('input, textarea, select')].filter((el) => labelText(el) === candidate.label);
+    }
+    if (candidate.placeholder) {
+      return [...document.querySelectorAll('[placeholder=' + JSON.stringify(candidate.placeholder) + ']')];
+    }
+    if (candidate.text) {
+      return [...document.querySelectorAll('a, button, span, div, p, li, td, th, label, h1, h2, h3')]
+        .filter((el) => norm(el.textContent) === candidate.text);
+    }
+    return [];
+  };
+
+  const strip = (candidate) => {
+    const copy = Object.assign({}, candidate);
+    delete copy.__dyn;
+    return copy;
+  };
+
+  /** Every candidate that finds the clicked element, best first, pinned by index when needed. */
+  const verified = (el) => {
+    const out = [];
+    for (const candidate of candidates(el)) {
+      const matches = matchesFor(candidate);
+      const at = matches.indexOf(el);
+      if (at < 0) continue;
+      if (matches.length === 1) out.push(candidate);
+      else if (matches.length <= 30) out.push(Object.assign({}, candidate, { nth: at }));
+      if (out.length >= 4) break;
+    }
+    if (out.length === 0) return out;
+    // Wording that looks like data may serve as a primary when nothing else
+    // matched, but is never kept as a fallback: a locator pinned to today's
+    // order number puts that number back into the scenario.
+    const alternatives = out.slice(1).filter((c) => !c.__dyn);
+    return [out[0]].concat(alternatives).map(strip);
+  };
+
   const emit = (action, el, args) => {
     if (state.paused) return;
-    el.setAttribute(MARK, '1');
-    return window.__trawlRec({ action: action, candidates: candidates(el), args: args || [] })
-      .catch(() => {})
-      .then(() => el.removeAttribute(MARK));
+    const found = verified(el);
+    // A sequence number and a timestamp: Node orders steps by when they happened
+    // in the page, not by when its own bookkeeping got round to them.
+    return window.__trawlRec({
+      action: action,
+      action_: action,
+      targets: found,
+      fallbackCss: cssPath(el),
+      args: args || [],
+      ts: Date.now(),
+      seq: state.seq++,
+    }).catch(() => {});
   };
 
   const flushFill = () => {

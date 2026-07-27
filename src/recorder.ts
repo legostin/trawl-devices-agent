@@ -1,8 +1,6 @@
 import { randomBytes } from "node:crypto";
-import type { ElementHandle, Page } from "playwright";
 import { AgentError, type StepRecord, type TargetSpec } from "./types.js";
 import { SessionStore } from "./sessions.js";
-import { toLocator } from "./targets.js";
 import { generate } from "./codegen.js";
 import { writeScript } from "./workspace.js";
 import { RECORDER_SOURCE } from "./recorderInject.js";
@@ -17,6 +15,8 @@ export interface Recording {
    *  navigation an already-recorded click caused. */
   lastStepAt: number;
   lastUrl: string | null;
+  /** Steps kept in page-event order; `steps` is rebuilt from this. */
+  pending: PendingStep[];
 }
 
 /** A navigation this soon after a recorded action is that action's consequence. */
@@ -39,7 +39,19 @@ interface RecorderDeps {
 
 interface RawEvent {
   action: string;
-  candidates: TargetSpec[];
+  /** Verified in the page, best first — see recorderInject. */
+  targets: TargetSpec[];
+  /** Used only when nothing verified: better a brittle path than no step. */
+  fallbackCss: string;
+  args: unknown[];
+  /** When the event happened in the page, and its order among page events. */
+  ts: number;
+  seq: number;
+}
+
+interface PendingStep {
+  ts: number;
+  action: string;
   args: unknown[];
 }
 
@@ -80,20 +92,32 @@ export class RecorderStore {
       startedAt: Date.now(),
       lastStepAt: 0,
       lastUrl: null,
+      pending: [],
     };
 
-    await session.context.exposeBinding("__trawlRec", async ({ page }, raw: RawEvent) => {
-      try {
-        const target = await this.pickTarget(page, raw.candidates, recording);
-        recording.steps.push({
-          index: recording.steps.length,
-          action: raw.action,
-          args: [target, ...raw.args],
-        });
-        recording.lastStepAt = Date.now();
-      } catch (err) {
-        recording.warnings.push(`dropped ${raw.action}: ${(err as Error).message}`);
+    await session.context.exposeBinding("__trawlRec", async (_source, raw: RawEvent) => {
+      const [primary, ...rest] = raw.targets ?? [];
+      if (!primary) {
+        recording.warnings.push(
+          `no verified target for ${raw.action}; fell back to a css path — check that step`,
+        );
       }
+      const alternatives = rest.slice(0, MAX_ALTERNATIVES);
+      const target: TargetSpec = primary
+        ? alternatives.length
+          ? { ...primary, or: alternatives }
+          : primary
+        : { css: raw.fallbackCss };
+
+      // Only the primary matters here: a fallback pinned by position is fine,
+      // it is only reached once the primary stops matching.
+      if (primary?.nth !== undefined) {
+        recording.warnings.push(
+          `matched by position: ${JSON.stringify(primary ?? target)} — check it if the list can reorder`,
+        );
+      }
+
+      this.record(recording, { ts: raw.ts, action: raw.action, args: [target, ...raw.args] });
     });
     await session.context.addInitScript(RECORDER_SOURCE);
 
@@ -107,8 +131,7 @@ export class RecorderStore {
       // A click we already recorded is what caused this navigation — recording
       // a goto as well would replay the click and then jump past its result.
       if (Date.now() - recording.lastStepAt < NAVIGATION_GRACE_MS) return;
-      recording.steps.push({ index: recording.steps.length, action: "goto", args: [url] });
-      recording.lastStepAt = Date.now();
+      this.record(recording, { ts: Date.now(), action: "goto", args: [url] });
     });
 
     this.deps.sessions.setState(sessionId, "recording");
@@ -120,74 +143,21 @@ export class RecorderStore {
   }
 
   /**
-   * Playwright's own locator engine is the arbiter: the first candidate that
-   * resolves to exactly one element, and to *the* marked element, wins.
+   * Steps are kept in the order things happened in the page. A click that
+   * navigates is reported after its own navigation event otherwise, and the
+   * replay then looks for the link on the page the click led to.
    */
-  private async pickTarget(page: Page, candidates: TargetSpec[], recording: Recording): Promise<TargetSpec> {
-    const verified = await this.verifyCandidates(page, candidates, recording);
-    if (verified.length === 0) {
-      const fallback = candidates.at(-1);
-      if (!fallback) throw new AgentError("script", "no candidate target");
-      recording.warnings.push(`no verified target; fell back to ${JSON.stringify(fallback)}`);
-      return fallback;
-    }
-    // Keep a couple of alternatives: the replay uses them when a refactor
-    // breaks the primary, instead of failing on a cosmetic change. Wording that
-    // looks like data is never kept — a fallback pinned to today's order number
-    // would put that number back into the scenario.
-    const [primary, ...rest] = verified;
-    const alternatives = rest.filter((c) => !isDynamic(c)).slice(0, MAX_ALTERNATIVES).map(clean);
-    const chosen = clean(primary!);
-    return alternatives.length ? { ...chosen, or: alternatives } : chosen;
-  }
+  private record(recording: Recording, step: PendingStep): void {
+    const at = recording.pending.findIndex((s) => s.ts > step.ts);
+    if (at < 0) recording.pending.push(step);
+    else recording.pending.splice(at, 0, step);
+    recording.lastStepAt = Math.max(recording.lastStepAt, step.ts);
 
-  /** Every candidate that resolves to the clicked element, best first. */
-  private async verifyCandidates(
-    page: Page,
-    candidates: TargetSpec[],
-    recording: Recording,
-  ): Promise<TargetSpec[]> {
-    const verified: TargetSpec[] = [];
-    for (const candidate of candidates) {
-      try {
-        const locator = toLocator(page, candidate);
-        const count = await locator.count();
-        if (count === 0) continue;
-        if (count === 1) {
-          if (await this.isMarked(locator)) verified.push(candidate);
-          continue;
-        }
-        // Ambiguous on its own, but still usable: pin it to the element that was
-        // actually clicked. Recording it bare would fail the replay with a
-        // strict-mode violation the moment the page has siblings like it.
-        if (count > MAX_AMBIGUOUS_MATCHES) continue;
-        for (let i = 0; i < count; i++) {
-          if (await this.isMarked(locator.nth(i))) {
-            if (verified.length === 0) {
-              recording.warnings.push(
-                `matched by position: ${JSON.stringify(candidate)} [${i}] — check it if the list can reorder`,
-              );
-            }
-            verified.push({ ...candidate, nth: i });
-            break;
-          }
-        }
-      } catch {
-        // try the next candidate
-      }
-      if (verified.length > MAX_ALTERNATIVES) break; // enough to heal with
-    }
-    return verified;
-  }
-
-  private async isMarked(locator: ReturnType<typeof toLocator>): Promise<boolean> {
-    const handle = (await locator.elementHandle({ timeout: 1000 })) as ElementHandle | null;
-    if (!handle) return false;
-    try {
-      return await handle.evaluate((el, mark) => (el as Element).hasAttribute(mark), MARK);
-    } finally {
-      await handle.dispose();
-    }
+    recording.steps = recording.pending.map((s, index) => ({
+      index,
+      action: s.action,
+      args: s.args,
+    }));
   }
 
   async stop(
