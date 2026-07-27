@@ -63,6 +63,10 @@ export class MapStore {
     await writeJson(path.join(screensDir(this.root), `${screen.id}.json`), screen);
   }
 
+  async removeScreen(id: string): Promise<void> {
+    await fs.rm(path.join(screensDir(this.root), `${id}.json`), { force: true });
+  }
+
   async saveApp(app: AppFile): Promise<void> {
     await writeJson(appFile(this.root), app);
   }

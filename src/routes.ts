@@ -11,6 +11,8 @@ import { readGuide } from "./guide.js";
 import { listArtifacts, listRuns, readArtifact } from "./archive.js";
 import { heal } from "./heal.js";
 import { listSuites, readSuite, writeSuite, SuiteRunner, type SuiteFile } from "./suites.js";
+import { MapStore } from "./mapStore.js";
+import { editMap, type EditInput } from "./mapEdit.js";
 
 export interface RouteDeps {
   workspace: string;
@@ -295,6 +297,13 @@ export function buildRoutes(deps: RouteDeps): Route[] {
           proxyPort: input.proxyPort,
         });
       },
+    },
+
+    { method: "GET", path: "/map", handler: async () => new MapStore(workspace).load() },
+    {
+      method: "POST",
+      path: "/map/edit",
+      handler: async (_r, _p, b) => editMap(workspace, body<EditInput>(b)),
     },
 
     { method: "GET", path: "/guide", handler: async () => ({ guide: await readGuide() }) },
