@@ -247,3 +247,45 @@ it("records again in a session that has already been recorded once", async () =>
   expect(two.steps.map((s) => s.action)).toEqual(["fill", "click"]);
   expect(two.code).toContain("second@example.com");
 });
+
+const controls = fixture.replace("form.html", "controls.html");
+
+/** Run a recording against the controls fixture and hand back its steps. */
+async function recordControls(act: (page: import("playwright").Page) => Promise<void>) {
+  const session = await sessions.start(device, { headless: true });
+  const recording = await recorder.start(session.sessionId, controls);
+  const page = sessions.get(session.sessionId).page;
+  await act(page);
+  await page.waitForTimeout(300);
+  return recorder.stop(recording.id, {});
+}
+
+it("records the button, not the icon inside it", async () => {
+  const result = await recordControls(async (page) => {
+    await page.locator("#icon-glyph").click();
+  });
+
+  const click = result.steps.find((s) => s.action === "click")!;
+  expect(click.args[0]).toMatchObject({ role: "button", name: "Настройки" });
+  // The css path of the svg must not survive anywhere in the step.
+  expect(JSON.stringify(click.args[0])).not.toContain("svg");
+});
+
+it("records a checkbox toggled through its label exactly once", async () => {
+  const result = await recordControls(async (page) => {
+    await page.locator("#agree-text").click();
+  });
+
+  // Label activation makes the browser click the control too; recording both
+  // would toggle it twice on replay.
+  expect(result.steps.map((s) => s.action)).toEqual(["goto", "check"]);
+});
+
+it("never records a fill for a radio or a checkbox", async () => {
+  const result = await recordControls(async (page) => {
+    await page.getByRole("radio", { name: "2010" }).click();
+  });
+
+  expect(result.steps.map((s) => s.action)).not.toContain("fill");
+  expect(result.steps.map((s) => s.action)).toEqual(["goto", "check"]);
+});

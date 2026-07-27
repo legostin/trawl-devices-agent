@@ -13,6 +13,13 @@ export const RECORDER_SOURCE = String.raw`
 
   const inOverlay = (el) => !!(el && el.closest && el.closest('[data-trawl-overlay]'));
 
+  // A human clicks a button; the event lands on the icon inside it. Recording
+  // the icon produces a css path that breaks on the next redesign.
+  const ACTIONABLE =
+    'button, a[href], [role=button], [role=link], [role=tab], [role=menuitem], [role=option],' +
+    'label, input, select, textarea, summary, [onclick], [tabindex]';
+  const actionable = (el) => (el.closest && el.closest(ACTIONABLE)) || el;
+
   const cssPath = (el) => {
     const parts = [];
     let node = el;
@@ -193,20 +200,30 @@ export const RECORDER_SOURCE = String.raw`
   };
 
   document.addEventListener('click', (e) => {
-    const el = e.target;
-    if (!el || inOverlay(el)) return;
+    const raw = e.target;
+    if (!raw || inOverlay(raw)) return;
     flushFill();
     if (state.mode === 'assert') {
       state.mode = 'record';
-      const text = (el.textContent || '').trim();
-      emit(text ? 'expectText' : 'expectVisible', el, text ? [text] : []);
+      // The raw target on purpose: when a human points at a span to assert its
+      // text, that span is what they meant.
+      const text = (raw.textContent || '').trim();
+      emit(text ? 'expectText' : 'expectVisible', raw, text ? [text] : []);
       return;
     }
+    const el = actionable(raw);
     const tag = el.tagName ? el.tagName.toLowerCase() : '';
     const type = (el.getAttribute && (el.getAttribute('type') || '')).toLowerCase();
     if (tag === 'input' && (type === 'checkbox' || type === 'radio')) {
       emit(el.checked ? 'check' : 'uncheck', el, []);
       return;
+    }
+    // Clicking a label makes the browser dispatch a second click on its control,
+    // which arrives here as the check/uncheck above. Recording this one as well
+    // would toggle the box twice on replay.
+    if (tag === 'label' && el.control) {
+      const controlType = (el.control.type || '').toLowerCase();
+      if (controlType === 'checkbox' || controlType === 'radio') return;
     }
     emit('click', el, []);
   }, true);
@@ -214,6 +231,10 @@ export const RECORDER_SOURCE = String.raw`
   document.addEventListener('input', (e) => {
     const el = e.target;
     if (!el || inOverlay(el)) return;
+    const type = (el.getAttribute && (el.getAttribute('type') || '')).toLowerCase();
+    // check/uncheck already recorded the intent; the value here is the option's
+    // own value attribute, never anything a human typed.
+    if (type === 'checkbox' || type === 'radio') return;
     if (el.tagName === 'SELECT') { emit('select', el, [el.value]); return; }
     if (state.pendingFill && state.pendingFill.el !== el) flushFill();
     state.pendingFill = { el: el, value: el.value };
