@@ -78,6 +78,15 @@ export class SessionStore {
     page.on("framenavigated", (frame) => {
       if (frame === page.mainFrame()) live.currentUrl = frame.url();
     });
+    // A human closing the window is a perfectly normal way to end a session.
+    // Without this the store keeps offering it forever, and the next use dies
+    // somewhere inside Playwright with a message about nothing in particular.
+    const forget = (): void => {
+      if (this.sessions.get(live.sessionId) === live) this.sessions.delete(live.sessionId);
+      live.state = "closed";
+    };
+    browser.on("disconnected", forget);
+    context.on("close", forget);
     this.sessions.set(live.sessionId, live);
     return this.describe(live);
   }

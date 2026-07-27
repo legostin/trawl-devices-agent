@@ -35,3 +35,16 @@ it("starts a session, exposes it, and stops it", async () => {
 it("throws a device error for an unknown session", () => {
   expect(() => store.get("nope")).toThrow(/unknown session: nope/);
 });
+
+it("forgets a session whose browser the human closed", async () => {
+  const session = await store.start(device);
+  const live = store.get(session.sessionId);
+
+  // Closing the window by hand is a normal way to end a session; the store must
+  // stop offering it, or the next use dies deep inside Playwright.
+  await live.browser.close();
+  await new Promise((r) => setTimeout(r, 200));
+
+  expect(store.list()).toHaveLength(0);
+  expect(() => store.get(session.sessionId)).toThrow(/unknown session/);
+});
