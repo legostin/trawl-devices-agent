@@ -180,3 +180,29 @@ it("holds a run between steps and carries on where it stopped", async () => {
   }
   expect(report.status).toBe("passed");
 });
+
+it("stops a held run at the next step", async () => {
+  const runner = new Runner({ sessions, workspace: root, trawlProxyPort: 8080 });
+  const started = await runner.start({
+    code: `goto('data:text/html,<h1>one</h1>')\nsleep(100)\nsleep(100)\nsleep(100)\nsleep(100)\n`,
+    device,
+    env: {},
+    secrets: {},
+  });
+  for (let i = 0; i < 100 && !runner.get(started.runId)!.sessionId; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  runner.setPaused(started.runId, true);
+  await new Promise((r) => setTimeout(r, 400));
+
+  // Giving up must work while held, or the only way out of a pause is to wait
+  // for a scenario you have already decided against.
+  expect(runner.cancel(started.runId)).toBe(true);
+  let report = runner.get(started.runId)!;
+  for (let i = 0; i < 100 && report.status === "running"; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    report = runner.get(started.runId)!;
+  }
+  expect(report.status).not.toBe("running");
+  expect(JSON.stringify(report.steps)).toContain("run cancelled");
+});
