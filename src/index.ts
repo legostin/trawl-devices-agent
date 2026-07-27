@@ -58,7 +58,19 @@ for (let candidate = wanted; candidate < wanted + 20 && port < 0; candidate++) {
   const server = createServer({
     token,
     getPort: () => port,
-    routes: buildRoutes({ workspace, trawlProxyPort, sessions }),
+    routes: [
+      ...buildRoutes({ workspace, trawlProxyPort, sessions }),
+      {
+        method: "POST" as const,
+        path: "/shutdown",
+        // Lets the plugin replace an agent it did not start itself — the usual
+        // case being a stale version left over from an earlier session.
+        handler: async () => {
+          setTimeout(() => void shutdown("/shutdown"), 50);
+          return { ok: true, agent: AGENT_VERSION };
+        },
+      },
+    ],
     health: () => ({ dsl: DSL_VERSION, steps: [...STEP_NAMES], workspace, proxyPort: trawlProxyPort }),
   });
   port = await listen(server, candidate);

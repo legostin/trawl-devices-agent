@@ -66,4 +66,5 @@ Playwright traces cannot be masked, so a device that uses `secret()` should keep
 | GET/POST | `/suites…` | list, read, write suites; run one and poll it |
 | POST | `/heal` | replay a failed run to its failing step and report the page |
 | POST | `/control/snapshot`, `/control/do` | live browser control |
+| POST | `/shutdown` | stop the agent (closing its browsers) so it can be replaced |
 | GET | `/guide` | the DSL reference |
