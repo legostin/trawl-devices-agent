@@ -103,3 +103,24 @@ it("replays up to the failure and reports what the page really offers", async ()
   // And the page's real controls are offered, the submit button among them.
   expect(result.candidates.some((c) => c.name === "Войти")).toBe(true);
 }, 60_000);
+
+it("knows which line each step came from, and leaves a failure on screen", async () => {
+  const report = await finish(
+    [
+      `use({ timeout: 900 })`,
+      `goto('${fixture}')`,
+      ``,
+      `// the element this looks for is not there`,
+      `click({ testId: 'nowhere' })`,
+    ].join("\n"),
+  );
+
+  expect(report.status).toBe("failed");
+  const failed = report.steps.find((s) => s.status === "failed")!;
+  expect(failed.line).toBe(5); // 1-based, comments and blanks counted
+  expect(report.steps.find((s) => s.action === "goto")!.line).toBe(2);
+
+  // The browser stays up so the state can be looked at — and recorded from.
+  expect(report.sessionId).toBeTruthy();
+  await sessions.stop(report.sessionId!);
+});

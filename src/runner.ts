@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import path from "node:path";
 import type { Locator } from "playwright";
 import { AgentError, type Device, type RunReport, type StepResult, type TargetSpec } from "./types.js";
-import { runInSandbox } from "./sandbox.js";
+import { lineFromStack, runInSandbox } from "./sandbox.js";
 import { describeTarget, isRegExp, resolveTarget, toLocator, toMatcher } from "./targets.js";
 import { SessionStore } from "./sessions.js";
 import { readScript, runDir, statePath } from "./workspace.js";
@@ -152,6 +152,11 @@ export class Runner {
         index: report.steps.length,
         action,
         args,
+        // Which line the failure belongs to — the editor highlights it, and a
+        // continuation recording is spliced in there.
+        ...(lineFromStack(new Error().stack) === undefined
+          ? {}
+          : { line: lineFromStack(new Error().stack) }),
         ...(currentName ? { name: currentName } : {}),
         status: "passed",
         startedAt: Date.now(),
@@ -538,7 +543,8 @@ export class Runner {
         if (keep) report.artifacts.trace = "trace.zip";
       }
       report.durationMs = Date.now() - report.startedAt;
-      if (ownSession && closeAfterRun) {
+      const keepForInspection = finalStatus !== "passed" && !input.device.closeOnFailure;
+      if (ownSession && closeAfterRun && !keepForInspection) {
         await this.deps.sessions.stop(session.sessionId);
       } else {
         this.deps.sessions.setState(session.sessionId, "idle");

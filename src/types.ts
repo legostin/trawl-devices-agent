@@ -53,6 +53,9 @@ export interface Device {
   videoFps: number;
   /** Close the browser when a run ends. Off leaves it open for inspection. */
   closeAfterRun: boolean;
+  /** Close it even when the run failed. Off keeps the failure on screen, which
+   *  is what lets a human look, fix, and record the missing steps from there. */
+  closeOnFailure: boolean;
   /** What this device type supports: "record" | "run" | "live" | "traffic". */
   capabilities: string[];
 }
@@ -81,6 +84,8 @@ export interface FlowRef {
 }
 
 export interface StepResult extends StepRecord {
+  /** 1-based line in the script this step came from, when it can be known. */
+  line?: number;
   status: "passed" | "failed" | "skipped";
   startedAt: number;
   durationMs: number;

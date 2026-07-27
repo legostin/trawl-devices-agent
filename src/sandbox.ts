@@ -3,6 +3,19 @@ import { AgentError, type StepRecord } from "./types.js";
 import { addAwaits, hasBranching, unknownCalls } from "./transform.js";
 import { ALLOWED_GLOBALS, STEP_NAMES } from "./steps.js";
 
+/**
+ * The script's own line for the frame that called us. Scripts run inside
+ * node:vm, so their frames are `evalmachine.<anonymous>:LINE:COL`, and the async
+ * wrapper shifts everything by one line.
+ */
+export function lineFromStack(stack: string | undefined): number | undefined {
+  if (!stack) return undefined;
+  const hit = /evalmachine\.<anonymous>:(\d+):\d+/.exec(stack);
+  if (!hit) return undefined;
+  const line = Number(hit[1]) - 1;
+  return line > 0 ? line : undefined;
+}
+
 export interface CollectError {
   kind: "syntax" | "unknown-step" | "runtime";
   message: string;
@@ -24,6 +37,8 @@ export async function runInSandbox(
 ): Promise<void> {
   const transformed = addAwaits(code, STEP_NAMES);
   const context = vm.createContext({ ...scope, console });
+  // The wrapper adds exactly one line, which is how a stack frame's line number
+  // maps back to the script the human wrote (see lineFromStack).
   const wrapped = `(async () => {\n${transformed}\n})()`;
   try {
     await vm.runInContext(wrapped, context, { timeout: timeoutMs, displayErrors: true });
