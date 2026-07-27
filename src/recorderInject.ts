@@ -227,6 +227,14 @@ export const RECORDER_SOURCE = String.raw`
     return [out[0]].concat(alternatives).map(strip);
   };
 
+  // What names the screen this step happened on. The heading first: a wizard
+  // keeps one document title across every step, but its heading changes.
+  const screenTitle = () => {
+    const heading = document.querySelector('h1');
+    const text = heading ? norm(heading.textContent) : '';
+    return text || norm(document.title);
+  };
+
   const emit = (action, el, args) => {
     if (state.paused) return;
     const found = verified(el);
@@ -237,6 +245,7 @@ export const RECORDER_SOURCE = String.raw`
       action_: action,
       targets: found,
       group: groupOf(el),
+      title: screenTitle(),
       fallbackCss: cssPath(el),
       args: args || [],
       ts: Date.now(),

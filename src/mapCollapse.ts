@@ -13,6 +13,8 @@ export interface CollapsedStep {
   group?: GroupInfo;
   /** Where the page was; the recording is cut into sections on it. */
   url?: string;
+  /** What named the screen at that moment: its heading, else the document title. */
+  title?: string;
 }
 
 const OPTION_ACTIONS = new Set(["check", "uncheck", "click"]);

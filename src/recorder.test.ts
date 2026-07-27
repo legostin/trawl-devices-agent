@@ -7,6 +7,7 @@ import { RecorderStore } from "./recorder.js";
 import { SessionStore } from "./sessions.js";
 import { Runner } from "./runner.js";
 import { validateDevice } from "./devices.js";
+import { MapStore } from "./mapStore.js";
 import type { RunReport } from "./types.js";
 
 const fixture = pathToFileURL(
@@ -42,17 +43,26 @@ it("records clicks and typing as declarative steps", async () => {
   expect(actions).toContain("fill");
   expect(actions).toContain("click");
 
-  // The ladder prefers role+name over label, and testId over everything; the
-  // runners-up are kept as fallbacks for when a refactor breaks the primary.
+  // The script says what it means; the ladder lives in the map.
   const fillStep = result.steps.find((s) => s.action === "fill")!;
-  expect(fillStep.args[0]).toMatchObject({ role: "textbox", name: "Email" });
-  expect((fillStep.args[0] as { or?: unknown[] }).or).toContainEqual({ label: "Email" });
+  expect(fillStep.args[0]).toBe("Sign in › Email");
   expect(fillStep.args[1]).toBe("user@example.com");
 
   const clickStep = result.steps.find((s) => s.action === "click")!;
-  expect(clickStep.args[0]).toMatchObject({ testId: "submit" });
-  expect((clickStep.args[0] as { or?: unknown[] }).or).toContainEqual({ role: "button", name: "Войти" });
+  expect(clickStep.args[0]).toBe("Sign in › Войти");
   expect(result.warnings).toEqual([]);
+
+  // The ladder prefers role+name over label, and testId over everything; the
+  // runners-up are kept as fallbacks for when a refactor breaks the primary.
+  const map = await new MapStore(root).load();
+  const elements = map.screens[0]!.elements;
+  const email = Object.values(elements).find((e) => e.label === "Email")!.target!;
+  expect(email).toMatchObject({ role: "textbox", name: "Email" });
+  expect(email.or).toContainEqual({ label: "Email" });
+
+  const submit = Object.values(elements).find((e) => e.label === "Войти")!.target!;
+  expect(submit).toMatchObject({ testId: "submit" });
+  expect(submit.or).toContainEqual({ role: "button", name: "Войти" });
 });
 
 it("round-trips: recorded clicks replay green", async () => {
@@ -142,16 +152,16 @@ it("never records a target that would hit several elements on replay", async () 
   await page.waitForTimeout(300);
   const result = await recorder.stop(recording.id, {});
 
-  const click = result.steps.find((s) => s.action === "click")!;
-  const target = click.args[0] as Record<string, unknown>;
+  const map = await new MapStore(root).load();
+  const entry = Object.values(map.screens[0]!.elements)[0]!;
 
   // Whatever the recorder chose, it must resolve to exactly one element.
   const check = await sessions.start(device, { headless: true });
   const probe = sessions.get(check.sessionId).page;
   await probe.goto(list);
   const { toLocator } = await import("./targets.js");
-  expect(await toLocator(probe, target).count()).toBe(1);
-  expect(target.name ?? "").not.toContain("\n");
+  expect(await toLocator(probe, entry.target!).count()).toBe(1);
+  expect(String(entry.target!.name ?? "")).not.toContain("\n");
 });
 
 it("prefers wording without digits, and matches by position when the text is data", async () => {
@@ -169,13 +179,20 @@ it("prefers wording without digits, and matches by position when the text is dat
 
   const result = await recorder.stop(recording.id, {});
   const clicks = result.steps.filter((s) => s.action === "click");
-  const [button, order] = clicks.map((s) => s.args[0] as Record<string, unknown>);
+  const [button, order] = clicks.map((s) => s.args[0] as string);
 
-  expect(button).toMatchObject({ role: "button", name: "Создать заказ" });
+  // Stable wording names the entry; data wording names nothing, so that entry
+  // is stored unnamed and surfaces for review instead of pretending.
+  expect(button).toBe("Orders › Создать заказ");
+  expect(order).toBe("Orders › Без названия (link)");
+  expect(result.map.review).toHaveLength(1);
 
-  // The order link must not be pinned to today's number — not even as a fallback.
-  expect(JSON.stringify(order)).not.toContain("42");
-  expect(order).toMatchObject({ role: "link", nth: 1 });
+  // And the locator must not be pinned to today's number — not even as a fallback.
+  const map = await new MapStore(root).load();
+  const entry = Object.values(map.screens[0]!.elements).find((e) => e.label.startsWith("Без названия"))!;
+  expect(JSON.stringify(entry.target)).not.toContain("42");
+  expect(entry.target).toMatchObject({ role: "link", nth: 1 });
+  expect(entry.status).toBe("proposed");
   expect(result.warnings.some((w) => w.includes("matched by position"))).toBe(true);
 });
 
@@ -201,10 +218,12 @@ it("records a navigating click before the navigation it causes, with a real targ
   expect(gotoBefore).toBeLessThan(clickAt);
   expect(gotoAfter).toBe(false);
 
-  // And the target is a real locator, not a css path scraped after the fact.
-  const target = result.steps[clickAt]!.args[0] as Record<string, unknown>;
-  expect(target).toMatchObject({ role: "link", name: "Open the form" });
-  expect(target.css).toBeUndefined();
+  // And the entry behind it is a real locator, not a css path scraped after the fact.
+  expect(result.steps[clickAt]!.args[0]).toBe("Index › Open the form");
+  const map = await new MapStore(root).load();
+  const entry = Object.values(map.screens[0]!.elements)[0]!;
+  expect(entry.target).toMatchObject({ role: "link", name: "Open the form" });
+  expect(entry.target!.css).toBeUndefined();
 });
 
 it("records a fragment of a session in progress, without reloading it", async () => {
@@ -266,9 +285,13 @@ it("records the button, not the icon inside it", async () => {
   });
 
   const click = result.steps.find((s) => s.action === "click")!;
-  expect(click.args[0]).toMatchObject({ role: "button", name: "Настройки" });
-  // The css path of the svg must not survive anywhere in the step.
-  expect(JSON.stringify(click.args[0])).not.toContain("svg");
+  expect(click.args[0]).toBe("controls fixture › Настройки");
+
+  // The css path of the svg must not survive anywhere — not even in the map.
+  const map = await new MapStore(root).load();
+  const entry = Object.values(map.screens[0]!.elements)[0]!;
+  expect(entry.target).toMatchObject({ role: "button", name: "Настройки" });
+  expect(JSON.stringify(entry.target)).not.toContain("svg");
 });
 
 it("records a checkbox toggled through its label exactly once", async () => {
@@ -286,8 +309,10 @@ it("never records a fill for a radio or a checkbox", async () => {
     await page.getByRole("radio", { name: "2010" }).click();
   });
 
+  // Picking one of a fixed set is a select on the group, not a check on the
+  // seventh radio — and never a fill with the option's value attribute.
   expect(result.steps.map((s) => s.action)).not.toContain("fill");
-  expect(result.steps.map((s) => s.action)).toEqual(["goto", "check"]);
+  expect(result.steps.map((s) => s.action)).toEqual(["goto", "select"]);
 });
 
 it("names a radio by its own label even when that label is a number", async () => {
@@ -296,10 +321,14 @@ it("names a radio by its own label even when that label is a number", async () =
   });
 
   // "2010" is the identity of an option, not this week's data — the case that
-  // used to produce check({ role: 'radio', nth: 7 }).
-  const step = result.steps.find((s) => s.action === "check")!;
-  expect(step.args[0]).toMatchObject({ role: "radio", name: "2010" });
-  expect((step.args[0] as { nth?: number }).nth).toBeUndefined();
+  // used to produce check({ role: 'radio', nth: 7 }). It ends up as the value.
+  const step = result.steps.find((s) => s.action === "select")!;
+  expect(step.args).toEqual(["controls fixture › Год", "2010"]);
+
+  const map = await new MapStore(root).load();
+  const entry = Object.values(map.screens[0]!.elements).find((e) => e.label === "Год")!;
+  expect(entry.kind).toBe("choice");
+  expect(JSON.stringify(entry.group)).not.toContain("nth");
 });
 
 it("names a button by its title when it has nothing else", async () => {
@@ -308,5 +337,5 @@ it("names a button by its title when it has nothing else", async () => {
   });
 
   const click = result.steps.find((s) => s.action === "click")!;
-  expect(click.args[0]).toMatchObject({ role: "button", name: "Добавить фото" });
+  expect(click.args[0]).toBe("controls fixture › Добавить фото");
 });

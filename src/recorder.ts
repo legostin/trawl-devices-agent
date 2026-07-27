@@ -4,7 +4,11 @@ import { SessionStore, type LiveSession } from "./sessions.js";
 import { generate } from "./codegen.js";
 import { writeScript } from "./workspace.js";
 import { RECORDER_SOURCE } from "./recorderInject.js";
-import type { GroupInfo } from "./mapCollapse.js";
+import { MapStore, slug } from "./mapStore.js";
+import { matchesScreen } from "./mapScreens.js";
+import { collapse, type CollapsedStep, type GroupInfo } from "./mapCollapse.js";
+import { reconcile, type Observation } from "./mapReconcile.js";
+import type { AppMap } from "./mapTypes.js";
 
 export interface Recording {
   id: string;
@@ -33,6 +37,14 @@ export interface StopOptions {
   closeSession?: boolean;
 }
 
+export interface MapSummary {
+  screens: number;
+  elements: number;
+  strengthened: number;
+  /** What a human should look at; everything else was accepted silently. */
+  review: string[];
+}
+
 interface RecorderDeps {
   sessions: SessionStore;
   workspace: string;
@@ -44,6 +56,8 @@ interface RawEvent {
   targets: TargetSpec[];
   /** Set when the element is one option of a fixed set — see mapCollapse. */
   group?: GroupInfo | null;
+  /** What named the screen when this happened: its heading, else the title. */
+  title?: string;
   /** Used only when nothing verified: better a brittle path than no step. */
   fallbackCss: string;
   args: unknown[];
@@ -59,6 +73,8 @@ interface PendingStep {
   group?: GroupInfo;
   /** The page url when the step happened — sections are cut on it. */
   url?: string;
+  /** What named the screen at that moment. */
+  title?: string;
 }
 
 const MARK = "data-trawl-rec-el";
@@ -76,6 +92,38 @@ const clean = (target: TargetSpec): TargetSpec => {
 const MAX_AMBIGUOUS_MATCHES = 30;
 /** How many fallbacks to keep beside the primary target. */
 const MAX_ALTERNATIVES = 2;
+
+/** The screen a url belongs to: an existing one, or a candidate named after the page. */
+const screenFor = (
+  map: AppMap,
+  url: string,
+  title: string,
+): { id: string; label: string; match: { url: string } } => {
+  const known = map.screens.find((s) => matchesScreen(s, url));
+  if (known) return { id: known.id, label: known.label, match: known.match as { url: string } };
+  let pathname = "/";
+  try {
+    pathname = new URL(url).pathname;
+  } catch {
+    // a file:// fixture or an opaque url — the title still names it
+  }
+  const label = title.trim() || pathname;
+  return { id: slug(label), label, match: { url: `**${pathname}` } };
+};
+
+/**
+ * The wording that names an element, taken off the ladder the page verified.
+ * The whole ladder, not just its head: a testId wins as a locator and carries
+ * no wording, while the fallback beneath it is exactly the accessible name.
+ */
+const labelOf = (targets: TargetSpec[]): string => {
+  for (const target of targets) {
+    for (const value of [target?.name, target?.label, target?.text, target?.placeholder]) {
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+  }
+  return "";
+};
 
 export class RecorderStore {
   private readonly recordings = new Map<string, Recording>();
@@ -160,6 +208,7 @@ export class RecorderStore {
         action: raw.action,
         args: [target, ...raw.args],
         url: session.page.url(),
+        ...(raw.title ? { title: raw.title } : {}),
         ...(raw.group ? { group: raw.group } : {}),
       });
     });
@@ -202,7 +251,7 @@ export class RecorderStore {
   async stop(
     id: string,
     options: StopOptions,
-  ): Promise<{ steps: StepRecord[]; code: string; warnings: string[]; scriptPath?: string }> {
+  ): Promise<{ steps: StepRecord[]; code: string; warnings: string[]; scriptPath?: string; map: MapSummary }> {
     const recording = this.get(id);
     const session = this.deps.sessions.get(recording.sessionId);
     await session.page
@@ -211,6 +260,7 @@ export class RecorderStore {
       )
       .catch(() => {});
     await session.page.waitForTimeout(150);
+    const title = await session.page.title().catch(() => "");
 
     this.recordings.delete(id);
     this.active.delete(recording.sessionId);
@@ -219,12 +269,66 @@ export class RecorderStore {
     if (options.closeSession === true) await this.deps.sessions.stop(recording.sessionId);
     else this.deps.sessions.setState(recording.sessionId, "idle");
 
-    const code = generate(recording.steps, { header: "recorded by trawl-devices-agent" });
+    const store = new MapStore(this.deps.workspace);
+    const map = await store.load();
+    const summary: MapSummary = { screens: 0, elements: 0, strengthened: 0, review: [] };
+    const now = new Date().toISOString();
+
+    const collapsed = collapse(recording.pending as CollapsedStep[]);
+    const steps: StepRecord[] = [];
+
+    for (const step of collapsed) {
+      // Navigation is not an element; it keeps its literal argument, and it sits
+      // outside any section because it is what moves between them.
+      if (step.action === "goto") {
+        steps.push({ index: steps.length, action: step.action, args: step.args });
+        continue;
+      }
+
+      const where = screenFor(map, step.url ?? session.page.url(), step.title ?? title);
+      const before = map.screens.length;
+
+      const isChoice = step.action === "select" && Boolean(step.group);
+      const primary = step.args[0] as TargetSpec;
+      // The ladder the page verified: the primary first, then its fallbacks.
+      const targets = isChoice
+        ? step.group!.targets
+        : [{ ...primary, or: undefined }, ...(primary.or ?? [])];
+      const observation: Observation = {
+        screenId: where.id,
+        screenLabel: where.label,
+        screenMatch: where.match,
+        label: isChoice ? String(step.args[0]) : labelOf(targets),
+        kind: isChoice ? "choice" : "control",
+        targets,
+        ...(isChoice ? { option: { role: "radio" } } : {}),
+      };
+      const outcome = reconcile(map, observation, now);
+      if (map.screens.length > before) summary.screens++;
+      if (outcome.created) summary.elements++;
+      if (outcome.strengthened) summary.strengthened++;
+      if (outcome.review) summary.review.push(outcome.review);
+
+      steps.push({
+        index: steps.length,
+        action: step.action,
+        // The reference the scenario writes: qualified, so it never goes ambiguous.
+        args: [outcome.ref, ...step.args.slice(1)],
+        // Sections are cut where the screen changed; codegen prints the runs.
+        section: where.label,
+      });
+    }
+
+    for (const screen of map.screens) await store.saveScreen(screen);
+
+    recording.steps = steps;
+    const code = generate(steps, { header: "recorded by trawl-devices-agent" });
     if (options.saveAs) await writeScript(this.deps.workspace, options.saveAs, code);
     return {
-      steps: recording.steps,
+      steps,
       code,
       warnings: recording.warnings,
+      map: summary,
       ...(options.saveAs ? { scriptPath: options.saveAs } : {}),
     };
   }
