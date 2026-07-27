@@ -50,3 +50,35 @@ it("round-trips through collect", async () => {
   expect(isRegExp(result.steps[2]!.args[1])).toBe(true);
   expect(String(result.steps[2]!.args[1])).toBe("/Привет/");
 });
+
+it("wraps consecutive steps of one section in a step() block", () => {
+  const code = generate([
+    { index: 0, action: "goto", args: ["https://x.org/a/new/"] },
+    { index: 1, action: "select", args: ["Марка", "Volkswagen"], section: "Марка и модель" },
+    { index: 2, action: "select", args: ["Год", "2010"], section: "Характеристики" },
+    { index: 3, action: "click", args: ["Подать объявление"], section: "Характеристики" },
+  ]);
+
+  expect(code).toBe(
+    [
+      "goto('https://x.org/a/new/')",
+      "step('Марка и модель', () => {",
+      "  select('Марка', 'Volkswagen')",
+      "})",
+      "step('Характеристики', () => {",
+      "  select('Год', '2010')",
+      "  click('Подать объявление')",
+      "})",
+      "",
+    ].join("\n"),
+  );
+});
+
+it("returns to the top level when a section ends", () => {
+  const code = generate([
+    { index: 0, action: "click", args: ["A"], section: "Первый" },
+    { index: 1, action: "click", args: ["B"] },
+  ]);
+
+  expect(code).toBe(["step('Первый', () => {", "  click('A')", "})", "click('B')", ""].join("\n"));
+});

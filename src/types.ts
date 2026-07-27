@@ -75,6 +75,8 @@ export interface StepRecord {
   args: unknown[];
   /** Set by step(name, fn) for the steps nested inside it. */
   name?: string;
+  /** The recorded section this step belongs to; printed as a step() block. */
+  section?: string;
 }
 
 export interface FlowRef {
