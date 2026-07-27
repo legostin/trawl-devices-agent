@@ -58,13 +58,28 @@ export const RECORDER_SOURCE = String.raw`
   // textContent (icons, newlines, double spaces) would never match it.
   const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
 
+  const byIds = (value) =>
+    (value || '')
+      .split(/\s+/)
+      .map((id) => document.getElementById(id))
+      .filter(Boolean)
+      .map((node) => norm(node.textContent))
+      .filter(Boolean)
+      .join(' ');
+
+  // The order ARIA specifies, and the one Playwright computes with: an icon
+  // button usually has nothing but a title, and losing it costs us the name.
   const accessibleName = (el) => {
+    const labelledBy = byIds(el.getAttribute('aria-labelledby'));
+    if (labelledBy) return labelledBy;
     const aria = norm(el.getAttribute('aria-label'));
     if (aria) return aria;
     if (el.labels && el.labels[0]) return norm(el.labels[0].textContent);
     const text = norm(el.textContent);
     if (text && text.length <= 60) return text;
-    return norm(el.getAttribute('value'));
+    const value = norm(el.getAttribute('value'));
+    if (value) return value;
+    return norm(el.getAttribute('title'));
   };
 
   const labelText = (el) => (el.labels && el.labels[0] ? norm(el.labels[0].textContent) : '');
@@ -72,6 +87,14 @@ export const RECORDER_SOURCE = String.raw`
   // Text carrying digits is almost always data — an order number, a price, a
   // date, a count. Matching on it records today's data as tomorrow's selector.
   const looksDynamic = (s) => /\d/.test(s);
+
+  const OPTION_ROLES = ['radio', 'checkbox', 'option', 'switch', 'menuitemradio', 'menuitemcheckbox'];
+  const OPTION_CONTAINERS = '[role=radiogroup], [role=listbox], [role=menu], fieldset, select';
+
+  // Inside a closed set of choices, digits are the identity of the option — a
+  // year, a capacity, a power rating. Outside one they are this week's data.
+  const optionLike = (el, role) =>
+    OPTION_ROLES.indexOf(role) >= 0 || !!(el.closest && el.closest(OPTION_CONTAINERS));
 
   /** Ordered candidate targets, best first. */
   const candidates = (el) => {
@@ -85,11 +108,15 @@ export const RECORDER_SOURCE = String.raw`
     const placeholder = el.getAttribute('placeholder');
     const own = norm(el.textContent);
 
+    // Wording that carries digits is data — unless this element is one of a
+    // fixed set of choices, where the digits are what the choice *is*.
+    const dataLike = optionLike(el, role) ? () => false : looksDynamic;
+
     // Stable wording first.
-    if (role && name && !looksDynamic(name)) out.push({ role: role, name: name });
-    if (label && !looksDynamic(label)) out.push({ label: label });
-    if (placeholder && !looksDynamic(placeholder)) out.push({ placeholder: placeholder });
-    if (own && own.length <= 40 && !looksDynamic(own)) out.push({ text: own });
+    if (role && name && !dataLike(name)) out.push({ role: role, name: name });
+    if (label && !dataLike(label)) out.push({ label: label });
+    if (placeholder && !dataLike(placeholder)) out.push({ placeholder: placeholder });
+    if (own && own.length <= 40 && !dataLike(own)) out.push({ text: own });
 
     // Then structure: the Node side pins this to the element that was clicked,
     // so "the third row" survives the numbers inside it changing.
@@ -97,10 +124,10 @@ export const RECORDER_SOURCE = String.raw`
 
     // Only then the wording that looks like data. It is marked so the Node side
     // can use it as a last resort without ever saving it as a fallback.
-    if (role && name && looksDynamic(name)) out.push({ role: role, name: name, __dyn: true });
-    if (label && looksDynamic(label)) out.push({ label: label, __dyn: true });
-    if (placeholder && looksDynamic(placeholder)) out.push({ placeholder: placeholder, __dyn: true });
-    if (own && own.length <= 40 && looksDynamic(own)) out.push({ text: own, __dyn: true });
+    if (role && name && dataLike(name)) out.push({ role: role, name: name, __dyn: true });
+    if (label && dataLike(label)) out.push({ label: label, __dyn: true });
+    if (placeholder && dataLike(placeholder)) out.push({ placeholder: placeholder, __dyn: true });
+    if (own && own.length <= 40 && dataLike(own)) out.push({ text: own, __dyn: true });
 
     out.push({ css: cssPath(el) });
     return out;

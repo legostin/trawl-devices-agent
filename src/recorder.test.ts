@@ -289,3 +289,24 @@ it("never records a fill for a radio or a checkbox", async () => {
   expect(result.steps.map((s) => s.action)).not.toContain("fill");
   expect(result.steps.map((s) => s.action)).toEqual(["goto", "check"]);
 });
+
+it("names a radio by its own label even when that label is a number", async () => {
+  const result = await recordControls(async (page) => {
+    await page.getByRole("radio", { name: "2010" }).click();
+  });
+
+  // "2010" is the identity of an option, not this week's data — the case that
+  // used to produce check({ role: 'radio', nth: 7 }).
+  const step = result.steps.find((s) => s.action === "check")!;
+  expect(step.args[0]).toMatchObject({ role: "radio", name: "2010" });
+  expect((step.args[0] as { nth?: number }).nth).toBeUndefined();
+});
+
+it("names a button by its title when it has nothing else", async () => {
+  const result = await recordControls(async (page) => {
+    await page.locator("#titled-glyph").click();
+  });
+
+  const click = result.steps.find((s) => s.action === "click")!;
+  expect(click.args[0]).toMatchObject({ role: "button", name: "Добавить фото" });
+});
