@@ -147,10 +147,12 @@ export class SuiteRunner {
         }
 
         const failed = run.steps.find((s) => s.status === "failed");
-        result.status = run.status === "error" ? "error" : "failed";
+        result.status = run.status === "error" || run.status === "cancelled" ? "error" : "failed";
         result.failedStep = failed
           ? { index: failed.index, action: failed.action, message: failed.error?.message }
           : undefined;
+        // Someone stopped this one by hand; retrying is not what they meant.
+        if (run.status === "cancelled") break;
       }
     }
 

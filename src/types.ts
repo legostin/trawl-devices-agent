@@ -106,7 +106,8 @@ export interface RunReport {
   sessionId?: string;
   script: string | null;
   device: string;
-  status: "running" | "passed" | "failed" | "error";
+  /** `cancelled` is a decision, not a defect — it must not read as a failure. */
+  status: "running" | "passed" | "failed" | "error" | "cancelled";
   /** Held between steps; the browser sits exactly where the scenario left it. */
   paused?: boolean;
   startedAt: number;

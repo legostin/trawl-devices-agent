@@ -203,6 +203,7 @@ it("stops a held run at the next step", async () => {
     await new Promise((r) => setTimeout(r, 100));
     report = runner.get(started.runId)!;
   }
-  expect(report.status).not.toBe("running");
+  // Giving up is a decision, not a defect the run found.
+  expect(report.status).toBe("cancelled");
   expect(JSON.stringify(report.steps)).toContain("run cancelled");
 });

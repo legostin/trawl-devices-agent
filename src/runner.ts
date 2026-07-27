@@ -591,7 +591,8 @@ export class Runner {
       finalStatus = "passed";
     } catch (err) {
       const kind = err instanceof AgentError ? err.kind : "script";
-      finalStatus = kind === "assertion" || kind === "timeout" ? "failed" : "error";
+      // Giving up on a run is a decision someone made, not a defect it found.
+      finalStatus = state.cancelled ? "cancelled" : kind === "assertion" || kind === "timeout" ? "failed" : "error";
       if (!report.steps.some((s) => s.status === "failed")) {
         // The script threw outside a step (e.g. a bare `throw`).
         report.steps.push({
