@@ -135,8 +135,16 @@ export class RecorderStore {
     });
 
     this.deps.sessions.setState(sessionId, "recording");
-    if (url) await session.page.goto(url);
-    else await session.page.reload();
+    if (url) {
+      await session.page.goto(url);
+    } else {
+      // Recording a fragment of a session already in progress: install into the
+      // live page instead of reloading, which would throw away where the human
+      // has got to — the whole point of starting here rather than at the login.
+      await session.page.evaluate(RECORDER_SOURCE).catch(async () => {
+        await session.page.reload();
+      });
+    }
 
     this.recordings.set(recording.id, recording);
     return recording;

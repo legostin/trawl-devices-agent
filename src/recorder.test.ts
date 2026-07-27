@@ -206,3 +206,22 @@ it("records a navigating click before the navigation it causes, with a real targ
   expect(target).toMatchObject({ role: "link", name: "Open the form" });
   expect(target.css).toBeUndefined();
 });
+
+it("records a fragment of a session in progress, without reloading it", async () => {
+  const session = await sessions.start(device, { headless: true });
+  const page = sessions.get(session.sessionId).page;
+
+  // Get somewhere first — the state a fragment recording must not lose.
+  await page.goto(fixture);
+  await page.getByLabel("Email").fill("already@typed.in");
+
+  const recording = await recorder.start(session.sessionId);
+  expect(await page.getByLabel("Email").inputValue()).toBe("already@typed.in");
+
+  await page.getByTestId("submit").click();
+  await page.waitForTimeout(300);
+  const result = await recorder.stop(recording.id, {});
+
+  // Only what happened after the recording started.
+  expect(result.steps.map((s) => s.action)).toEqual(["click"]);
+});

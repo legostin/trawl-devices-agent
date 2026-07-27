@@ -80,11 +80,15 @@ the recording says so in its warnings.
    apply to hosts inside the active project's scope, and the faked exchange shows
    up in the traffic list like any other flow. A mock that never fired is
    reported as a warning rather than passing quietly.
-8. **Sign in once.** End a login scenario with `saveState('auth')`; other
+8. **Record only the part that matters.** Get the browser where you want it —
+   by hand or by running the login scenario with `closeAfterRun` off — then
+   start recording in that same session. The recorded fragment begins where you
+   are, and is usually written to start with `run('scripts/login.js')`.
+9. **Sign in once.** End a login scenario with `saveState('auth')`; other
    scenarios call `useState('auth')` right after their first `goto` and skip the
    login entirely. Cookies apply immediately; localStorage is seeded for the
    origin the page is on, so the order matters.
-9. **Compose instead of repeating.** Record login once and call it:
+10. **Compose instead of repeating.** Record login once and call it:
 
 ```js
 run('scripts/login.js')
