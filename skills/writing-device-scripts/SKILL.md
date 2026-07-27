@@ -42,18 +42,42 @@ click({ role: 'row', name: 'Заказ 42', within: { testId: 'orders' } })
 Recording follows the same order, with one twist: wording that contains digits
 (`Заказ 42`, a price, a date) is treated as data, not as a selector. Such an
 element is matched by its position among elements of the same role instead, and
-the recording says so in its warnings.
+the recording says so in its warnings. The exception is an element belonging to a
+fixed set of choices — a radio group, a listbox, a `fieldset` — where digits are
+the identity of the option (`2010`, `210 л.с.`) rather than this week's value.
+
+## Names from the map
+
+Where the workspace has a `map/`, a **string** takes the place of a target and
+the map holds the locator:
+
+```js
+open('Подача объявления')
+select('Год', '2010')
+click('Подать объявление')
+expectApi('POST /api/adverts', 201)
+```
+
+A name is looked up on the current screen first, then among the shared elements,
+then anywhere it is unique. When it is ambiguous the run refuses it and names the
+qualified form that would fix it — `click('Характеристики › Продолжить')`.
+
+Prefer names to literal targets. A markup change is then one edit in the map
+rather than one edit per scenario, and the scenario says what it means.
 
 ## Steps
 
-- Navigation: `goto`, `back`, `forward`, `reload`
+- Navigation: `goto`, `back`, `forward`, `reload`, `open('Экран')` — go to a
+  screen the map knows, which holds how to get there (`open.url` or `open.flow`)
 - Actions: `click`, `dblclick`, `fill`, `type`, `press`, `check`, `uncheck`,
   `select`, `hover`, `upload`, `drag`, `scrollTo`
 - Waits: `waitFor(target, 'visible'|'hidden'|'attached')`, `waitForUrl`,
   `waitForResponse`, `sleep`
 - UI assertions: `expectVisible`, `expectHidden`, `expectText`, `expectValue`,
   `expectUrl`, `expectCount`, `expectAttr`
-- HTTP assertions: `expectRequest`, `expectResponse`, `expectNoRequest`
+- HTTP assertions: `expectRequest`, `expectResponse`, `expectNoRequest`,
+  `expectApi('POST /api/adverts', 201)` — one call, one status, no dependence on
+  markup at all, which is what makes it survive a redesign
 - Reads: `getText`, `getValue`, `getAttr`, `getUrl`, `count`
 - Composition: `run('scripts/login.js')`, `run('scripts/login.js', { USER: 'someone@example.com' })`
 - Signed-in state: `saveState('auth')`, `useState('auth')`

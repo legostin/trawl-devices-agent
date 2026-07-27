@@ -293,6 +293,23 @@ export class Runner {
         await page.reload({ timeout });
       }),
 
+      /** Go to a screen by its map label. `match` has wildcards and is not navigable. */
+      open: tracked("open", async (label: string) => {
+        const target = findScreen(map, label);
+        if (target.open?.url) {
+          await page.goto(url(target.open.url), { timeout });
+          return;
+        }
+        if (target.open?.flow) {
+          await (scope.run as (relPath: string) => Promise<void>)(target.open.flow);
+          return;
+        }
+        throw new AgentError(
+          "script",
+          `у экрана «${target.label}» не задано, как на него попасть — добавьте open.url или open.flow`,
+        );
+      }),
+
       click: tracked("click", async (t: TargetSpec | string) => {
         await (await find(t)).click({ timeout });
       }),
@@ -438,6 +455,17 @@ export class Runner {
           throw new AgentError("assertion", `unexpected request ${describeMatcher(parseMatcher(matcher))}`, {
             expected: "no request",
             actual: `${hits.length} request(s)`,
+          });
+        }
+      }),
+
+      /** The assertion the row UI writes: one call, one request, one status. */
+      expectApi: tracked("expectApi", async (matcher: string | MatcherObject, status?: number) => {
+        const hit = await traffic.consume(parseMatcher(matcher), timeout);
+        if (status !== undefined && hit.status !== status) {
+          throw new AgentError("assertion", `status of ${describeMatcher(parseMatcher(matcher))} does not match`, {
+            expected: String(status),
+            actual: String(hit.status),
           });
         }
       }),

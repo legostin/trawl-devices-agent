@@ -89,3 +89,33 @@ it("an unknown name fails as a script error, naming what is near", async () => {
   expect(report.steps.at(-1)!.error?.kind).toBe("script");
   expect(report.steps.at(-1)!.error?.message).toContain("Год");
 });
+
+it("opens a screen by name", async () => {
+  const store = new MapStore(root);
+  await store.saveScreen({
+    version: 1,
+    id: "harakteristiki",
+    label: "Характеристики",
+    match: { url: "**/choices.html" },
+    open: { url: choices },
+    elements: {
+      podat: {
+        label: "Подать объявление",
+        kind: "control",
+        target: { role: "button", name: "Подать объявление" },
+        source: "recorded",
+        status: "accepted",
+        updatedAt: "2026-07-27T09:00:00.000Z",
+      },
+    },
+  });
+
+  const report = await runToCompletion(`open('Характеристики')\nclick('Подать объявление')\n`);
+  expect(report.status).toBe("passed");
+  expect(report.steps[0]!.action).toBe("open");
+});
+
+it("says so when a screen has no way in", async () => {
+  const report = await runToCompletion(`open('Характеристики')\n`);
+  expect(report.steps.at(-1)!.error?.message).toMatch(/не задано, как на него попасть/);
+});
