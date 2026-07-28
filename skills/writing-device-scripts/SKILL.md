@@ -65,6 +65,12 @@ qualified form that would fix it — `click('Характеристики › П
 Prefer names to literal targets. A markup change is then one edit in the map
 rather than one edit per scenario, and the scenario says what it means.
 
+The plugin edits this file as rows rather than text. That works because the DSL
+is flat — one call per line — so a row maps to a line and back. Anything that is
+not a flat step call (a loop, a condition, arbitrary JS) is kept verbatim and
+shown read-only, and a step commented out with `//` stays a disabled row rather
+than disappearing. Write flat steps and the visual editor stays useful.
+
 ## Steps
 
 - Navigation: `goto`, `back`, `forward`, `reload`, `open('Экран')` — go to a

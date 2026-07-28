@@ -13,6 +13,9 @@ import { heal } from "./heal.js";
 import { listSuites, readSuite, writeSuite, SuiteRunner, type SuiteFile } from "./suites.js";
 import { MapStore } from "./mapStore.js";
 import { editMap, type EditInput } from "./mapEdit.js";
+import { toRows } from "./rows.js";
+import { applyCommand, type Command } from "./rowEdit.js";
+import { applyStructure, type StructureCommand } from "./rowExtract.js";
 
 export interface RouteDeps {
   workspace: string;
@@ -84,6 +87,28 @@ export function buildRoutes(deps: RouteDeps): Route[] {
         }
         await writeScript(workspace, rel, code);
         return { path: rel, steps: validation.steps.length };
+      },
+    },
+    {
+      method: "POST",
+      path: "/scripts/rows",
+      handler: async (_r, _p, b) => ({ rows: toRows(body<{ code: string }>(b).code) }),
+    },
+    {
+      method: "POST",
+      path: "/scripts/apply",
+      handler: async (_r, _p, b) => {
+        const { code, command } = body<{ code: string; command: Command | StructureCommand }>(b);
+        // Structure commands reshape the file; the rest edit one row.
+        if (["group", "ungroup", "rename", "extract"].includes(command.kind)) {
+          const result = applyStructure(code, command as StructureCommand);
+          if (result.extracted) await writeScript(workspace, result.extracted.path, result.extracted.code);
+          return {
+            code: result.code,
+            ...(result.extracted ? { extracted: { path: result.extracted.path } } : {}),
+          };
+        }
+        return { code: applyCommand(code, command as Command) };
       },
     },
     {
