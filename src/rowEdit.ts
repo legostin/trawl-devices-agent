@@ -6,6 +6,7 @@ export type Command =
   | { kind: "remove"; id: string }
   | { kind: "setDisabled"; id: string; disabled: boolean }
   | { kind: "move"; id: string; before: string | null }
+  | { kind: "setAction"; id: string; action: string }
   | { kind: "setArg"; id: string; index: number; value: unknown }
   | { kind: "insert"; before: string | null; action: string; args: unknown[]; section?: string };
 
@@ -62,6 +63,14 @@ export function applyCommand(code: string, command: Command): string {
       ? text.replace(/^([ \t]*)/, "$1// ")
       : text.replace(/^([ \t]*)\/\/\s?/, "$1");
     return splice(code, [start, end], next);
+  }
+
+  if (command.kind === "setAction") {
+    if (row.kind !== "step" || row.disabled || !row.action) {
+      throw new AgentError("script", "поменять действие можно только у обычного шага");
+    }
+    // The statement starts at its callee, so the name is the first thing in it.
+    return splice(code, [row.range[0], row.range[0] + row.action.length], command.action);
   }
 
   if (command.kind === "setArg") {

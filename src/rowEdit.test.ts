@@ -92,3 +92,17 @@ it("moves a row forward, where every id after it has shifted", () => {
       .map((r) => r.args[0]?.value),
   ).toEqual(["Телефон", "Продолжить", "https://x.org/", "Готово"]);
 });
+
+it("changes what a step does, keeping its arguments", () => {
+  const out = applyCommand(CODE, { kind: "setAction", id: id(CODE, "click"), action: "hover" });
+
+  expect(out).toBe(CODE.replace("click('Продолжить')", "hover('Продолжить')"));
+});
+
+it("refuses to change the action of a disabled row", () => {
+  const off = applyCommand(CODE, { kind: "setDisabled", id: id(CODE, "click"), disabled: true });
+  const disabled = toRows(off).find((r) => r.disabled)!;
+  expect(() => applyCommand(off, { kind: "setAction", id: disabled.id, action: "hover" })).toThrow(
+    /обычного шага/,
+  );
+});
