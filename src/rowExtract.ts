@@ -7,7 +7,8 @@ export type StructureCommand =
   | { kind: "group"; ids: string[]; name: string }
   | { kind: "ungroup"; section: string }
   | { kind: "rename"; section: string; name: string }
-  | { kind: "extract"; section: string; path?: string };
+  | { kind: "extract"; section: string; path?: string }
+  | { kind: "moveSection"; section: string; before: string | null };
 
 export interface StructureResult {
   code: string;
@@ -75,6 +76,22 @@ export function applyStructure(code: string, command: StructureCommand): Structu
   }
 
   const body = sectionRows(rows, command.section);
+
+  if (command.kind === "moveSection") {
+    const [start, end] = sectionSpan(code, body);
+    const block = code.slice(start, end);
+    const without = code.slice(0, start) + code.slice(end);
+
+    if (command.before === null) {
+      return { code: `${without.endsWith("\n") || !without ? without : `${without}\n`}${block}` };
+    }
+    // Resolved against the original parse and then shifted by the cut: row ids
+    // come from position, so re-finding the anchor would land elsewhere.
+    const target = sectionRows(rows, command.before);
+    const [targetStart] = sectionSpan(code, target);
+    const at = targetStart > start ? targetStart - (end - start) : targetStart;
+    return { code: without.slice(0, at) + block + without.slice(at) };
+  }
 
   if (command.kind === "rename") {
     const [start] = sectionSpan(code, body);

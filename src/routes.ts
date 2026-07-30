@@ -100,7 +100,7 @@ export function buildRoutes(deps: RouteDeps): Route[] {
       handler: async (_r, _p, b) => {
         const { code, command } = body<{ code: string; command: Command | StructureCommand }>(b);
         // Structure commands reshape the file; the rest edit one row.
-        if (["group", "ungroup", "rename", "extract"].includes(command.kind)) {
+        if (["group", "ungroup", "rename", "extract", "moveSection"].includes(command.kind)) {
           const result = applyStructure(code, command as StructureCommand);
           if (result.extracted) await writeScript(workspace, result.extracted.path, result.extracted.code);
           return {

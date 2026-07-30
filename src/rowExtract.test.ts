@@ -41,3 +41,19 @@ it("refuses to group rows that are not next to each other", () => {
   const ids = [rows[0]!.id, rows[3]!.id];
   expect(() => applyStructure(FLAT, { kind: "group", ids, name: "X" })).toThrow(/подряд/);
 });
+
+const TWO = `step('Вход', () => {\n  click('A')\n})\nstep('Подача', () => {\n  click('B')\n})\nclick('C')\n`;
+
+it("moves a whole section, not just its first step", () => {
+  // The canvas is the mode for structure; without this it cannot reorder
+  // anything, which is most of why it exists.
+  const { code } = applyStructure(TWO, { kind: "moveSection", section: "Подача", before: "Вход" });
+
+  expect(code).toBe(`step('Подача', () => {\n  click('B')\n})\nstep('Вход', () => {\n  click('A')\n})\nclick('C')\n`);
+});
+
+it("moves a section to the end", () => {
+  const { code } = applyStructure(TWO, { kind: "moveSection", section: "Вход", before: null });
+
+  expect(code).toBe(`step('Подача', () => {\n  click('B')\n})\nclick('C')\nstep('Вход', () => {\n  click('A')\n})\n`);
+});
