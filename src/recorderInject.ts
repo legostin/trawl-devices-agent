@@ -276,6 +276,14 @@ export const RECORDER_SOURCE = String.raw`
       group: groupOf(el),
       title: screenTitle(),
       dialog: dialogInfo(el),
+      // Where the element sits right now. A picture of it can only be taken
+      // while it is still on screen, and a click that navigates takes the page
+      // away almost at once.
+      rect: (() => {
+        const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+        if (!r || r.width < 4 || r.height < 4 || r.width > 1600 || r.height > 1200) return null;
+        return { x: Math.max(0, r.left), y: Math.max(0, r.top), width: r.width, height: r.height };
+      })(),
       fallbackCss: cssPath(el),
       args: args || [],
       ts: Date.now(),

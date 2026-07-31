@@ -63,6 +63,8 @@ interface RawEvent {
   title?: string;
   /** Set when the element was inside a modal — a screen of its own. */
   dialog?: { label: string; marker: TargetSpec | null } | null;
+  /** Where it sat on screen, for the thumbnail. */
+  rect?: { x: number; y: number; width: number; height: number } | null;
   /** Used only when nothing verified: better a brittle path than no step. */
   fallbackCss: string;
   args: unknown[];
@@ -82,6 +84,8 @@ interface PendingStep {
   title?: string;
   /** The modal it happened in, if any. */
   dialog?: { label: string; marker: TargetSpec | null };
+  /** A png of the element, taken while it was still on screen. */
+  shot?: Buffer;
 }
 
 const MARK = "data-trawl-rec-el";
@@ -252,10 +256,19 @@ export class RecorderStore {
         );
       }
 
+      // Taken now, not at stop: a click that navigates takes the page away, and
+      // then there is nothing left to photograph.
+      const shot = raw.rect
+        ? await session.page
+            .screenshot({ clip: raw.rect, timeout: 1500 })
+            .catch(() => undefined)
+        : undefined;
+
       this.record(recording, {
         ts: raw.ts,
         action: raw.action,
         args: [target, ...raw.args],
+        ...(shot ? { shot } : {}),
         url: session.page.url(),
         ...(raw.title ? { title: raw.title } : {}),
         ...(raw.dialog ? { dialog: raw.dialog } : {}),
@@ -355,6 +368,16 @@ export class RecorderStore {
         ...(isChoice ? { option: { role: "radio" } } : {}),
       };
       const outcome = reconcile(map, observation, now);
+
+      // The picture belongs to the entry that was just created or reused, so it
+      // is attached after reconciliation decided which one that is.
+      if (step.shot) {
+        const screen = map.screens.find((s) => s.id === where.id);
+        const found = screen && Object.entries(screen.elements).find(([, e]) => e.label === refParts(outcome.ref).element);
+        if (screen && found) {
+          found[1].shot = await store.saveShot(`${screen.id}-${found[0]}`, step.shot);
+        }
+      }
       if (map.screens.length > before) summary.screens++;
       if (outcome.created) summary.elements++;
       if (outcome.strengthened) summary.strengthened++;

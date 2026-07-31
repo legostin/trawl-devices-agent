@@ -63,6 +63,24 @@ export class MapStore {
     await writeJson(path.join(screensDir(this.root), `${screen.id}.json`), screen);
   }
 
+  /**
+   * A picture of one element, beside the map. A catalogue of words cannot tell
+   * you which "Без названия" is which icon; a thumbnail can.
+   */
+  async saveShot(name: string, data: Buffer): Promise<string> {
+    const dir = path.join(mapDir(this.root), "shots");
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, `${name}.png`), data);
+    return `shots/${name}.png`;
+  }
+
+  async readShot(rel: string): Promise<Buffer> {
+    // Confined to the map directory: this path arrives over HTTP.
+    const file = path.resolve(mapDir(this.root), rel);
+    if (!file.startsWith(mapDir(this.root) + path.sep)) throw new Error("path escapes the map");
+    return fs.readFile(file);
+  }
+
   async removeScreen(id: string): Promise<void> {
     await fs.rm(path.join(screensDir(this.root), `${id}.json`), { force: true });
   }

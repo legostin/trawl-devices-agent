@@ -365,6 +365,16 @@ export function buildRoutes(deps: RouteDeps): Route[] {
     },
 
     {
+      method: "GET",
+      path: "/map/shot",
+      handler: async (_r, p) => {
+        const data = await new MapStore(workspace).readShot(p.path!);
+        // Base64 rather than bytes: every other route on this agent speaks
+        // JSON, and a thumbnail is small enough not to care.
+        return { path: p.path, png: data.toString("base64") };
+      },
+    },
+    {
       method: "POST",
       path: "/map/write",
       handler: async (_r, _p, b) => writeMap(workspace, body<WriteInput>(b), new Date().toISOString()),

@@ -17,6 +17,8 @@ export interface CollapsedStep {
   title?: string;
   /** The modal it happened in — a screen of its own. */
   dialog?: { label: string; marker: TargetSpec | null };
+  /** A png of the element, taken while it was on screen. */
+  shot?: Buffer;
 }
 
 const OPTION_ACTIONS = new Set(["check", "uncheck", "click"]);

@@ -21,6 +21,8 @@ export interface ElementEntry {
   option?: TargetSpec;
   /** Requests this element is expected to cause, e.g. "POST /api/adverts". */
   api?: string[];
+  /** A thumbnail of the element, relative to map/ — what it actually looks like. */
+  shot?: string;
   source: "recorded" | "ai" | "human";
   /** A proposed entry works in a run but fails CI: unverified is not accepted. */
   status: "proposed" | "accepted";

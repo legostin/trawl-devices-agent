@@ -85,3 +85,20 @@ it("records how to get back to the screen, so a fragment can replay on its own",
   const map = await new MapStore(root).load();
   expect(map.screens[0]!.open?.url).toBe(choices);
 });
+
+it("photographs each element while it is still on screen", async () => {
+  const session = await sessions.start(device, { headless: true });
+  const recording = await recorder.start(session.sessionId, choices);
+  const page = sessions.get(session.sessionId).page;
+  await page.getByRole("button", { name: "Подать объявление" }).click();
+  await page.waitForTimeout(300);
+  await recorder.stop(recording.id, {});
+
+  // A catalogue of words cannot say which "Без названия" is which icon.
+  const store = new MapStore(root);
+  const entry = Object.values((await store.load()).screens[0]!.elements)[0]!;
+  expect(entry.shot).toMatch(/^shots\/.+\.png$/);
+
+  const png = await store.readShot(entry.shot!);
+  expect(png.subarray(1, 4).toString()).toBe("PNG");
+});
