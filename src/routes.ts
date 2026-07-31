@@ -2,7 +2,7 @@ import type { Route } from "./server.js";
 import { SessionStore } from "./sessions.js";
 import { Runner } from "./runner.js";
 import { getDevice, loadDevices, saveDevice } from "./devices.js";
-import { listScripts, readScript, writeScript } from "./workspace.js";
+import { callersOf, deleteScript, listScripts, readScript, writeScript } from "./workspace.js";
 import { collect } from "./sandbox.js";
 import { AgentError } from "./types.js";
 import { RecorderStore } from "./recorder.js";
@@ -87,6 +87,24 @@ export function buildRoutes(deps: RouteDeps): Route[] {
         }
         await writeScript(workspace, rel, code);
         return { path: rel, steps: validation.steps.length };
+      },
+    },
+    {
+      method: "POST",
+      path: "/scripts/delete",
+      handler: async (_r, _p, b) => {
+        const { path: rel, force } = body<{ path: string; force?: boolean }>(b);
+        const callers = await callersOf(workspace, rel);
+        // A scenario that calls this one would start dying on a missing file,
+        // and it would die at run time, in a suite, at the worst moment.
+        if (callers.length && !force) {
+          throw new AgentError(
+            "script",
+            `сценарий вызывают: ${callers.join(", ")} — удалите вызовы или повторите с force`,
+          );
+        }
+        await deleteScript(workspace, rel);
+        return { deleted: rel, callers };
       },
     },
     {

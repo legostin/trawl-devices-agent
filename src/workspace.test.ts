@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { resolveInWorkspace, ensureWorkspace, readScript, writeScript, listScripts } from "./workspace.js";
+import { resolveInWorkspace, ensureWorkspace, readScript, writeScript, listScripts, callersOf, deleteScript } from "./workspace.js";
 
 let root: string;
 beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "ws-")); });
@@ -37,4 +37,21 @@ describe("scripts", () => {
     await writeFile(path.join(root, "scripts/ignore.txt"), "not a script");
     expect((await listScripts(root)).sort()).toEqual(["scripts/login.js", "scripts/nested/deep.js"]);
   });
+});
+
+it("names the scenarios that call one before it is deleted", async () => {
+  await writeScript(root, "scripts/login.js", "click('Войти')\n");
+  await writeScript(root, "scripts/search.js", "run('scripts/login.js')\nclick('Найти')\n");
+  await writeScript(root, "scripts/post.js", "run('login.js')\n");
+  await writeScript(root, "scripts/alone.js", "click('X')\n");
+
+  // Both spellings reach the same file, and the runner accepts either.
+  expect((await callersOf(root, "scripts/login.js")).sort()).toEqual(["scripts/post.js", "scripts/search.js"]);
+  expect(await callersOf(root, "scripts/alone.js")).toEqual([]);
+});
+
+it("deletes a scenario", async () => {
+  await writeScript(root, "scripts/gone.js", "click('X')\n");
+  await deleteScript(root, "scripts/gone.js");
+  expect(await listScripts(root)).not.toContain("scripts/gone.js");
 });

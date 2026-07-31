@@ -38,6 +38,31 @@ export async function writeScript(root: string, rel: string, code: string): Prom
   await fs.writeFile(abs, code, "utf8");
 }
 
+/**
+ * Scenarios that call `rel` through run(). Deleting one of those out from
+ * under them turns a green suite into a run that dies on a missing file, so
+ * the caller gets the list before anything is removed.
+ */
+export async function callersOf(root: string, rel: string): Promise<string[]> {
+  const name = rel.replace(/^\/+/, "");
+  const bare = name.replace(/^scripts\//, "");
+  const callers: string[] = [];
+  for (const path of await listScripts(root)) {
+    if (path === name) continue;
+    const code = await readScript(root, path).catch(() => "");
+    // Both spellings reach the same file; the runner accepts either.
+    if (code.includes(`'${name}'`) || code.includes(`"${name}"`) ||
+        code.includes(`'${bare}'`) || code.includes(`"${bare}"`)) {
+      callers.push(path);
+    }
+  }
+  return callers;
+}
+
+export async function deleteScript(root: string, rel: string): Promise<void> {
+  await fs.rm(resolveInWorkspace(root, rel));
+}
+
 /** Every `.js` under scripts/, as workspace-relative paths. */
 export async function listScripts(root: string): Promise<string[]> {
   const out: string[] = [];
