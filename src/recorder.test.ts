@@ -361,3 +361,25 @@ it("pauses without ending the recording, and picks up where it left off", async 
   expect(result.steps.map((s) => s.action)).toEqual(["goto", "click", "check"]);
   expect(JSON.stringify(result.steps)).not.toContain("Добавить фото");
 });
+
+it("files a modal as a screen of its own, not as part of the page under it", async () => {
+  const session = await sessions.start(device, { headless: true });
+  const dialog = fixture.replace("form.html", "dialog.html");
+  const recording = await recorder.start(session.sessionId, dialog);
+  const page = sessions.get(session.sessionId).page;
+
+  await page.getByRole("button", { name: "Войти" }).click();
+  await page.getByLabel("Телефон").fill("747");
+  await page.getByRole("button", { name: "Продолжить" }).click();
+  await page.waitForTimeout(300);
+  await recorder.stop(recording.id, {});
+
+  // A modal shares its url with the page beneath, so without treating it as a
+  // screen everything it owns is filed under whatever page it opened on.
+  const map = await new MapStore(root).load();
+  const screens = Object.fromEntries(
+    map.screens.map((s) => [s.label, Object.values(s.elements).map((e) => e.label).sort()]),
+  );
+  expect(screens["Вход в личный кабинет"]).toEqual(["Продолжить", "Телефон"]);
+  expect(screens["dialog fixture"]).toEqual(["Войти"]);
+});

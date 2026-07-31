@@ -15,6 +15,8 @@ export interface CollapsedStep {
   url?: string;
   /** What named the screen at that moment: its heading, else the document title. */
   title?: string;
+  /** The modal it happened in — a screen of its own. */
+  dialog?: { label: string; marker: TargetSpec | null };
 }
 
 const OPTION_ACTIONS = new Set(["check", "uncheck", "click"]);

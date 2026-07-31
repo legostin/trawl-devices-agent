@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>dialog fixture</title>
+<body>
+  <button id="open">Войти</button>
+  <div id="modal" role="dialog" aria-modal="true" hidden>
+    <h2>Вход в личный кабинет</h2>
+    <label for="phone">Телефон</label>
+    <input id="phone">
+    <button id="next">Продолжить</button>
+  </div>
+  <script>
+    document.getElementById('open').addEventListener('click', () => {
+      document.getElementById('modal').hidden = false;
+    });
+  </script>
+</body>

@@ -245,6 +245,25 @@ export const RECORDER_SOURCE = String.raw`
     return candidates.find((t) => t.length <= MAX_SCREEN_LABEL) || (candidates[0] || '').slice(0, MAX_SCREEN_LABEL);
   };
 
+  // A modal is a screen by every measure that matters to a person, and by none
+  // that matter to a url: the login form over the front page shares its address
+  // with the marketing copy underneath. Without this everything a modal owns is
+  // filed under whatever page it happened to open on.
+  const DIALOG = '[role=dialog], [aria-modal=true], dialog';
+  const dialogInfo = (el) => {
+    const box = el.closest && el.closest(DIALOG);
+    if (!box) return null;
+    const heading = box.querySelector('h1, h2, h3, [role=heading]');
+    const headingText = heading ? norm(heading.textContent) : '';
+    const label = norm(box.getAttribute('aria-label')) || headingText;
+    return {
+      label: label || 'Диалог',
+      // The marker is what tells this screen from the page beneath it, which
+      // shares its url.
+      marker: headingText ? { role: 'heading', name: headingText } : null,
+    };
+  };
+
   const emit = (action, el, args) => {
     if (state.paused) return;
     const found = verified(el);
@@ -256,6 +275,7 @@ export const RECORDER_SOURCE = String.raw`
       targets: found,
       group: groupOf(el),
       title: screenTitle(),
+      dialog: dialogInfo(el),
       fallbackCss: cssPath(el),
       args: args || [],
       ts: Date.now(),

@@ -61,6 +61,8 @@ interface RawEvent {
   group?: GroupInfo | null;
   /** What named the screen when this happened: its heading, else the title. */
   title?: string;
+  /** Set when the element was inside a modal — a screen of its own. */
+  dialog?: { label: string; marker: TargetSpec | null } | null;
   /** Used only when nothing verified: better a brittle path than no step. */
   fallbackCss: string;
   args: unknown[];
@@ -78,6 +80,8 @@ interface PendingStep {
   url?: string;
   /** What named the screen at that moment. */
   title?: string;
+  /** The modal it happened in, if any. */
+  dialog?: { label: string; marker: TargetSpec | null };
 }
 
 const MARK = "data-trawl-rec-el";
@@ -101,7 +105,24 @@ const screenFor = (
   map: AppMap,
   url: string,
   title: string,
-): { id: string; label: string; match: { url: string }; open: { url: string } } => {
+  dialog?: { label: string; marker: TargetSpec | null },
+): { id: string; label: string; match: { url: string; marker?: TargetSpec }; open: { url: string } } => {
+  // A modal is its own screen: it shares its url with the page underneath, and
+  // the marker is what tells them apart. Found by id, because matching on the
+  // url alone would hand it that page.
+  if (dialog) {
+    const id = slug(dialog.label);
+    const seen = map.screens.find((s) => s.id === id);
+    return {
+      id,
+      label: seen?.label ?? dialog.label,
+      match: {
+        url: (seen?.match?.url as string) ?? screenPatternFor(url),
+        ...(dialog.marker ? { marker: dialog.marker } : {}),
+      },
+      open: { url: seen?.open?.url ?? url },
+    };
+  }
   // A screen whose pattern cannot pin a host is not reused: early recordings
   // derived `**` plus the pathname, and that screen then swallowed every screen
   // recorded after it. Re-recording must be able to fix a map, not inherit it.
@@ -237,6 +258,7 @@ export class RecorderStore {
         args: [target, ...raw.args],
         url: session.page.url(),
         ...(raw.title ? { title: raw.title } : {}),
+        ...(raw.dialog ? { dialog: raw.dialog } : {}),
         ...(raw.group ? { group: raw.group } : {}),
       });
     });
@@ -313,7 +335,7 @@ export class RecorderStore {
         continue;
       }
 
-      const where = screenFor(map, step.url ?? session.page.url(), step.title ?? title);
+      const where = screenFor(map, step.url ?? session.page.url(), step.title ?? title, step.dialog);
       const before = map.screens.length;
 
       const isChoice = step.action === "select" && Boolean(step.group);
