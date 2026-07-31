@@ -49,6 +49,26 @@ const splitUrl = (url: string): { path: string; hash: string } => {
  * URL only. A screen whose `match` is null is the shared pseudo-screen: always
  * in scope for name resolution, never the answer to "where am I".
  */
+/**
+ * A pattern that would also claim a different host is not describing a screen,
+ * it is claiming the whole web. Early recordings derived `**` plus the pathname,
+ * so the site root became `**​/` — which matches every url ending in a slash,
+ * and the first screen recorded then swallowed every screen after it.
+ *
+ * Reuse beats creation everywhere else in the map, which is exactly why one bad
+ * pattern poisons everything downstream: re-recording inherits it instead of
+ * fixing it.
+ *
+ * Only the recorder asks this, when deciding whether to reuse a screen. Matching
+ * itself stays literal: a hand-written `**​/a/new/**` means what it says.
+ */
+export function isTooBroad(pattern: string): boolean {
+  // A pattern that does not start with a scheme cannot pin a host, and a screen
+  // that does not name its host is not a screen. Every pattern derived today
+  // begins with one; only the early ones do not.
+  return !/^[a-z]+:\/\//i.test(pattern.trim());
+}
+
 export function matchesScreen(screen: ScreenFile, url: string): boolean {
   if (!screen.match) return false;
   const { path, hash } = splitUrl(url);

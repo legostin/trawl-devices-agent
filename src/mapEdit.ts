@@ -12,6 +12,11 @@ export interface EditInput {
   status?: "proposed" | "accepted";
   /** Drop the entry, or the whole screen when no element is named. */
   remove?: boolean;
+  /** Screen only: what url this screen is, and how to get back to it. */
+  match?: { url?: string; hash?: string };
+  open?: { url?: string; flow?: string };
+  /** Element only: the screen it really belongs to. */
+  moveTo?: string;
 }
 
 const findScreen = (screens: ScreenFile[], id: string): ScreenFile => {
@@ -36,6 +41,11 @@ export async function editMap(workspace: string, input: EditInput): Promise<{ sc
       return { screen: null };
     }
     if (input.label && input.label !== screen.label) screen.label = input.label;
+    // Fixing a screen by hand is the way out of a map recorded badly: a pattern
+    // that claimed the whole site is repaired here rather than by re-recording,
+    // which would only inherit it.
+    if (input.match) screen.match = { ...(screen.match ?? {}), ...input.match };
+    if (input.open) screen.open = { ...(screen.open ?? {}), ...input.open };
     await store.saveScreen(screen);
     return { screen };
   }
@@ -47,6 +57,16 @@ export async function editMap(workspace: string, input: EditInput): Promise<{ sc
 
   if (input.remove) {
     delete screen.elements[input.elementKey];
+  } else if (input.moveTo) {
+    // Everything piling onto one screen is what a too-broad pattern produces;
+    // moving elements back is the other half of repairing that by hand.
+    const target = findScreen(map.screens, input.moveTo);
+    if (target.id === screen.id) return { screen };
+    let key = input.elementKey;
+    for (let n = 2; target.elements[key]; n++) key = `${input.elementKey}-${n}`;
+    target.elements[key] = entry;
+    delete screen.elements[input.elementKey];
+    await store.saveScreen(target);
   } else {
     if (input.label && input.label !== entry.label) {
       const aliases = new Set([...(entry.aliases ?? []), entry.label]);

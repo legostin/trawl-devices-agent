@@ -5,7 +5,7 @@ import { generate } from "./codegen.js";
 import { writeScript } from "./workspace.js";
 import { RECORDER_SOURCE } from "./recorderInject.js";
 import { MapStore, slug } from "./mapStore.js";
-import { matchesScreen, screenPatternFor } from "./mapScreens.js";
+import { isTooBroad, matchesScreen, screenPatternFor } from "./mapScreens.js";
 import { collapse, type CollapsedStep, type GroupInfo } from "./mapCollapse.js";
 import { reconcile, type Observation } from "./mapReconcile.js";
 import { refParts, shortestRef } from "./mapRef.js";
@@ -102,7 +102,10 @@ const screenFor = (
   url: string,
   title: string,
 ): { id: string; label: string; match: { url: string }; open: { url: string } } => {
-  const known = map.screens.find((s) => matchesScreen(s, url));
+  // A screen whose pattern cannot pin a host is not reused: early recordings
+  // derived `**` plus the pathname, and that screen then swallowed every screen
+  // recorded after it. Re-recording must be able to fix a map, not inherit it.
+  const known = map.screens.find((s) => matchesScreen(s, url) && !isTooBroad(s.match?.url ?? ""));
   if (known) {
     return {
       id: known.id,

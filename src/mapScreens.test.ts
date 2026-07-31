@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { globToRegExp, matchesScreen, screenPatternFor } from "./mapScreens.js";
+import { globToRegExp, isTooBroad, matchesScreen, screenPatternFor } from "./mapScreens.js";
 import type { ScreenFile } from "./mapTypes.js";
 
 const screen = (match: ScreenFile["match"]): ScreenFile => ({
@@ -45,4 +45,23 @@ it("derives a pattern that is the host and path, with ids wildcarded", () => {
     "https://x.org/a/*/edit",
   );
   expect(matchesScreen(screen({ url: screenPatternFor("https://desktop.example.org/") }), "https://desktop.example.org/login/")).toBe(false);
+});
+
+it("refuses a pattern that would claim any host at all", () => {
+  // What early recordings produced for the site root, and what then swallowed
+  // every screen recorded after it.
+  expect(isTooBroad("**/")).toBe(true);
+  expect(isTooBroad("**")).toBe(true);
+  expect(isTooBroad("**/login/")).toBe(true);
+
+  expect(isTooBroad("https://desktop.example.org/")).toBe(false);
+  expect(isTooBroad("https://desktop.example.org/a/new/*")).toBe(false);
+});
+
+it("matching stays literal — the recorder is what refuses to reuse such a screen", () => {
+  // A hand-written pattern means what it says, so matching must not second-guess
+  // it; only the reuse decision in the recorder consults isTooBroad.
+  const legacy = screen({ url: "**/" });
+  expect(matchesScreen(legacy, "https://example.org/")).toBe(true);
+  expect(isTooBroad(legacy.match!.url!)).toBe(true);
 });
