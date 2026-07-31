@@ -39,8 +39,10 @@ it("writes what it saw into the map and scripts it by name", async () => {
   const result = await recorder.stop(recording.id, {});
 
   // The script carries intent, not locators.
-  expect(result.code).toContain("select('Характеристики › Год', '2010')");
-  expect(result.code).toContain("click('Характеристики › Подать объявление')");
+  // Unique names stand alone: qualifying them spends a screen's worth of
+  // words to say nothing.
+  expect(result.code).toContain("select('Год', '2010')");
+  expect(result.code).toContain("click('Подать объявление')");
   expect(result.code).not.toContain("nth");
   expect(result.code).not.toContain("css");
 

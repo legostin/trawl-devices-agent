@@ -8,6 +8,7 @@ import { MapStore, slug } from "./mapStore.js";
 import { matchesScreen, screenPatternFor } from "./mapScreens.js";
 import { collapse, type CollapsedStep, type GroupInfo } from "./mapCollapse.js";
 import { reconcile, type Observation } from "./mapReconcile.js";
+import { refParts, shortestRef } from "./mapRef.js";
 import type { AppMap } from "./mapTypes.js";
 
 export interface Recording {
@@ -337,7 +338,8 @@ export class RecorderStore {
       steps.push({
         index: steps.length,
         action: step.action,
-        // The reference the scenario writes: qualified, so it never goes ambiguous.
+        // Qualified for now; shortened below, once the whole map is known and
+        // it is possible to tell which names are ambiguous.
         args: [outcome.ref, ...step.args.slice(1)],
         // Sections are cut where the screen changed; codegen prints the runs.
         section: where.label,
@@ -345,6 +347,17 @@ export class RecorderStore {
     }
 
     for (const screen of map.screens) await store.saveScreen(screen);
+
+    // Now that the map is complete, drop the screen from every reference that
+    // does not need one. Qualifying a unique name costs a screen's worth of
+    // words to say nothing, and on a page whose heading is a marketing line it
+    // costs the whole width of the row.
+    for (const step of steps) {
+      const reference = step.args[0];
+      if (typeof reference !== "string") continue;
+      const { screen, element } = refParts(reference);
+      if (screen) step.args = [shortestRef(map, screen, element), ...step.args.slice(1)];
+    }
 
     recording.steps = steps;
     const code = generate(steps, { header: "recorded by trawl-devices-agent" });

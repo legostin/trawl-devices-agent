@@ -229,10 +229,20 @@ export const RECORDER_SOURCE = String.raw`
 
   // What names the screen this step happened on. The heading first: a wizard
   // keeps one document title across every step, but its heading changes.
+  // A heading is usually the name of the screen, but a landing page puts its
+  // marketing line there — and that name is then repeated on every element the
+  // screen owns. Long wording loses to a shorter honest source.
+  const MAX_SCREEN_LABEL = 32;
   const screenTitle = () => {
     const heading = document.querySelector('h1');
-    const text = heading ? norm(heading.textContent) : '';
-    return text || norm(document.title);
+    const candidates = [
+      heading ? norm(heading.textContent) : '',
+      // A document title is often "Section — Site"; the part before the dash is
+      // the section.
+      norm(document.title).split(/\s+[|—–·]\s+/)[0] || '',
+      norm(document.title),
+    ].filter(Boolean);
+    return candidates.find((t) => t.length <= MAX_SCREEN_LABEL) || (candidates[0] || '').slice(0, MAX_SCREEN_LABEL);
   };
 
   const emit = (action, el, args) => {

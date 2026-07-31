@@ -45,11 +45,11 @@ it("records clicks and typing as declarative steps", async () => {
 
   // The script says what it means; the ladder lives in the map.
   const fillStep = result.steps.find((s) => s.action === "fill")!;
-  expect(fillStep.args[0]).toBe("Sign in › Email");
+  expect(fillStep.args[0]).toBe("Email");
   expect(fillStep.args[1]).toBe("user@example.com");
 
   const clickStep = result.steps.find((s) => s.action === "click")!;
-  expect(clickStep.args[0]).toBe("Sign in › Войти");
+  expect(clickStep.args[0]).toBe("Войти");
   expect(result.warnings).toEqual([]);
 
   // The ladder prefers role+name over label, and testId over everything; the
@@ -183,8 +183,8 @@ it("prefers wording without digits, and matches by position when the text is dat
 
   // Stable wording names the entry; data wording names nothing, so that entry
   // is stored unnamed and surfaces for review instead of pretending.
-  expect(button).toBe("Orders › Создать заказ");
-  expect(order).toBe("Orders › Без названия (link)");
+  expect(button).toBe("Создать заказ");
+  expect(order).toBe("Без названия (link)");
   expect(result.map.review).toHaveLength(1);
 
   // And the locator must not be pinned to today's number — not even as a fallback.
@@ -219,7 +219,7 @@ it("records a navigating click before the navigation it causes, with a real targ
   expect(gotoAfter).toBe(false);
 
   // And the entry behind it is a real locator, not a css path scraped after the fact.
-  expect(result.steps[clickAt]!.args[0]).toBe("Index › Open the form");
+  expect(result.steps[clickAt]!.args[0]).toBe("Open the form");
   const map = await new MapStore(root).load();
   const entry = Object.values(map.screens[0]!.elements)[0]!;
   expect(entry.target).toMatchObject({ role: "link", name: "Open the form" });
@@ -285,7 +285,7 @@ it("records the button, not the icon inside it", async () => {
   });
 
   const click = result.steps.find((s) => s.action === "click")!;
-  expect(click.args[0]).toBe("controls fixture › Настройки");
+  expect(click.args[0]).toBe("Настройки");
 
   // The css path of the svg must not survive anywhere — not even in the map.
   const map = await new MapStore(root).load();
@@ -323,7 +323,7 @@ it("names a radio by its own label even when that label is a number", async () =
   // "2010" is the identity of an option, not this week's data — the case that
   // used to produce check({ role: 'radio', nth: 7 }). It ends up as the value.
   const step = result.steps.find((s) => s.action === "select")!;
-  expect(step.args).toEqual(["controls fixture › Год", "2010"]);
+  expect(step.args).toEqual(["Год", "2010"]);
 
   const map = await new MapStore(root).load();
   const entry = Object.values(map.screens[0]!.elements).find((e) => e.label === "Год")!;
@@ -337,7 +337,7 @@ it("names a button by its title when it has nothing else", async () => {
   });
 
   const click = result.steps.find((s) => s.action === "click")!;
-  expect(click.args[0]).toBe("controls fixture › Добавить фото");
+  expect(click.args[0]).toBe("Добавить фото");
 });
 
 it("pauses without ending the recording, and picks up where it left off", async () => {
