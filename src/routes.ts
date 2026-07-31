@@ -12,7 +12,9 @@ import { listArtifacts, listRuns, readArtifact } from "./archive.js";
 import { heal } from "./heal.js";
 import { listSuites, readSuite, writeSuite, SuiteRunner, type SuiteFile } from "./suites.js";
 import { MapStore } from "./mapStore.js";
-import { editMap, type EditInput } from "./mapEdit.js";
+import { editMap, writeMap, type EditInput, type WriteInput } from "./mapEdit.js";
+import { explore, verify } from "./mapExplore.js";
+import { matchesScreen } from "./mapScreens.js";
 import { toRows } from "./rows.js";
 import { applyCommand, type Command } from "./rowEdit.js";
 import { applyStructure, type StructureCommand } from "./rowExtract.js";
@@ -360,6 +362,39 @@ export function buildRoutes(deps: RouteDeps): Route[] {
       method: "POST",
       path: "/map/edit",
       handler: async (_r, _p, b) => editMap(workspace, body<EditInput>(b)),
+    },
+
+    {
+      method: "POST",
+      path: "/map/write",
+      handler: async (_r, _p, b) => writeMap(workspace, body<WriteInput>(b), new Date().toISOString()),
+    },
+    {
+      method: "POST",
+      path: "/map/explore",
+      handler: async (_r, _p, b) => {
+        const { sessionId, url } = body<{ sessionId: string; url?: string }>(b);
+        const session = sessions.get(sessionId);
+        if (url) await session.page.goto(url);
+        const map = await new MapStore(workspace).load();
+        const title = await session.page.title().catch(() => "");
+        return explore(session.page, map, title);
+      },
+    },
+    {
+      method: "POST",
+      path: "/map/verify",
+      handler: async (_r, _p, b) => {
+        const { sessionId, screenId } = body<{ sessionId: string; screenId?: string }>(b);
+        const session = sessions.get(sessionId);
+        const map = await new MapStore(workspace).load();
+        const url = session.page.url();
+        const screen = screenId
+          ? map.screens.find((s) => s.id === screenId)
+          : map.screens.find((s) => matchesScreen(s, url));
+        if (!screen) throw new AgentError("script", `для ${url} в карте нет экрана`);
+        return { screen: screen.label, entries: await verify(session.page, screen, 2000) };
+      },
     },
 
     { method: "GET", path: "/guide", handler: async () => ({ guide: await readGuide() }) },

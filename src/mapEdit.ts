@@ -1,6 +1,7 @@
 import { AgentError } from "./types.js";
-import { MapStore } from "./mapStore.js";
+import { MapStore, slug } from "./mapStore.js";
 import type { ScreenFile } from "./mapTypes.js";
+import type { TargetSpec } from "./types.js";
 
 export interface EditInput {
   screenId: string;
@@ -17,6 +18,72 @@ export interface EditInput {
   open?: { url?: string; flow?: string };
   /** Element only: the screen it really belongs to. */
   moveTo?: string;
+}
+
+export interface WriteInput {
+  screen: { id?: string; label: string; match?: { url?: string; hash?: string }; open?: { url?: string } };
+  elements: { label: string; kind?: "control" | "choice"; target?: TargetSpec; option?: TargetSpec; api?: string[] }[];
+}
+
+/**
+ * Write entries an agent worked out. They land as `proposed` and `ai` — never
+ * accepted — because a name nobody has read is a guess, and a map full of
+ * unreviewed guesses is worse than a small one somebody trusts.
+ *
+ * Existing entries are matched by label and updated rather than duplicated:
+ * forty entries for one button is the failure mode that makes a map worthless.
+ */
+export async function writeMap(
+  workspace: string,
+  input: WriteInput,
+  now: string,
+): Promise<{ screen: ScreenFile; created: string[]; updated: string[] }> {
+  const store = new MapStore(workspace);
+  const map = await store.load();
+  const id = input.screen.id ?? slug(input.screen.label);
+  const screen: ScreenFile =
+    map.screens.find((s) => s.id === id) ??
+    ({
+      version: 1,
+      id,
+      label: input.screen.label,
+      match: input.screen.match ?? null,
+      ...(input.screen.open ? { open: input.screen.open } : {}),
+      elements: {},
+    } as ScreenFile);
+
+  if (input.screen.match) screen.match = { ...(screen.match ?? {}), ...input.screen.match };
+  if (input.screen.open) screen.open = { ...(screen.open ?? {}), ...input.screen.open };
+
+  const created: string[] = [];
+  const updated: string[] = [];
+  for (const element of input.elements) {
+    const existing = Object.entries(screen.elements).find(([, e]) => e.label === element.label);
+    const kind = element.kind ?? "control";
+    const body = {
+      label: element.label,
+      kind,
+      ...(kind === "choice"
+        ? { group: element.target, option: element.option ?? { role: "option" } }
+        : { target: element.target }),
+      ...(element.api?.length ? { api: element.api } : {}),
+      source: "ai" as const,
+      status: "proposed" as const,
+      updatedAt: now,
+    };
+    if (existing) {
+      screen.elements[existing[0]] = { ...existing[1], ...body };
+      updated.push(element.label);
+    } else {
+      let key = slug(element.label);
+      for (let n = 2; screen.elements[key]; n++) key = `${slug(element.label)}-${n}`;
+      screen.elements[key] = body;
+      created.push(element.label);
+    }
+  }
+
+  await store.saveScreen(screen);
+  return { screen, created, updated };
 }
 
 const findScreen = (screens: ScreenFile[], id: string): ScreenFile => {
