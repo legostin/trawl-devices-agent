@@ -59,6 +59,24 @@ export async function callersOf(root: string, rel: string): Promise<string[]> {
   return callers;
 }
 
+/**
+ * Scenarios that name this map entry. Deleting an entry a scenario references
+ * turns it into a scenario that fails on resolution — at run time, in a suite,
+ * saying only that a name is not in the map.
+ */
+export async function referencesOf(root: string, label: string): Promise<string[]> {
+  const found: string[] = [];
+  for (const path of await listScripts(root)) {
+    const code = await readScript(root, path).catch(() => "");
+    // Bare or qualified: `click('Продолжить')` and `click('Вход › Продолжить')`
+    // both name the same entry.
+    if (code.includes(`'${label}'`) || code.includes(`"${label}"`) || code.includes(`› ${label}'`)) {
+      found.push(path);
+    }
+  }
+  return found;
+}
+
 export async function deleteScript(root: string, rel: string): Promise<void> {
   await fs.rm(resolveInWorkspace(root, rel));
 }

@@ -102,3 +102,25 @@ it("moves an element to the screen it really belongs to", async () => {
   expect(Object.keys(from.elements)).toEqual([]);
   expect(Object.values(to.elements).map((e) => e.label)).toEqual(["Без названия (button)"]);
 });
+
+it("refuses to delete an entry a scenario names", async () => {
+  const { writeScript } = await import("./workspace.js");
+  await writeScript(root, "scripts/login.js", "click('Без названия (button)')\n");
+
+  // Deleting it would turn that scenario into one that fails on resolution —
+  // at run time, saying only that a name is not in the map.
+  await expect(editMap(root, { screenId: "vhod", elementKey: "bez", remove: true })).rejects.toThrow(
+    /scripts\/login\.js/,
+  );
+
+  // Force is the way through, once the cost has been stated.
+  await editMap(root, { screenId: "vhod", elementKey: "bez", remove: true, force: true });
+  expect(Object.keys((await new MapStore(root).load()).screens[0]!.elements)).toEqual([]);
+});
+
+it("counts every name on a screen before deleting the screen", async () => {
+  const { writeScript } = await import("./workspace.js");
+  await writeScript(root, "scripts/a.js", "click('Без названия (button)')\n");
+
+  await expect(editMap(root, { screenId: "vhod", remove: true })).rejects.toThrow(/scripts\/a\.js/);
+});

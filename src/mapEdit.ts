@@ -1,5 +1,6 @@
 import { AgentError } from "./types.js";
 import { MapStore, slug } from "./mapStore.js";
+import { referencesOf } from "./workspace.js";
 import type { ScreenFile } from "./mapTypes.js";
 import type { TargetSpec } from "./types.js";
 
@@ -18,6 +19,8 @@ export interface EditInput {
   open?: { url?: string; flow?: string };
   /** Element only: the screen it really belongs to. */
   moveTo?: string;
+  /** Delete even though scenarios name this entry. */
+  force?: boolean;
 }
 
 export interface WriteInput {
@@ -86,6 +89,16 @@ export async function writeMap(
   return { screen, created, updated };
 }
 
+/** Scenarios naming any of these entries — empty when force says go ahead. */
+const usedBy = async (workspace: string, labels: string[], force?: boolean): Promise<string[]> => {
+  if (force) return [];
+  const scripts = new Set<string>();
+  for (const label of labels) {
+    for (const path of await referencesOf(workspace, label)) scripts.add(path);
+  }
+  return [...scripts].sort();
+};
+
 const findScreen = (screens: ScreenFile[], id: string): ScreenFile => {
   const screen = screens.find((s) => s.id === id);
   if (!screen) throw new AgentError("script", `экран «${id}» не найден в карте`);
@@ -104,6 +117,18 @@ export async function editMap(workspace: string, input: EditInput): Promise<{ sc
 
   if (!input.elementKey) {
     if (input.remove) {
+      // A screen takes its elements with it, so every name on it is at stake.
+      const used = await usedBy(
+        workspace,
+        Object.values(screen.elements).map((e) => e.label),
+        input.force,
+      );
+      if (used.length) {
+        throw new AgentError(
+          "script",
+          `на элементы этого экрана ссылаются: ${used.join(", ")} — удалите ссылки или повторите с force`,
+        );
+      }
       await store.removeScreen(screen.id);
       return { screen: null };
     }
@@ -123,6 +148,13 @@ export async function editMap(workspace: string, input: EditInput): Promise<{ sc
   }
 
   if (input.remove) {
+    const used = await usedBy(workspace, [entry.label], input.force);
+    if (used.length) {
+      throw new AgentError(
+        "script",
+        `на «${entry.label}» ссылаются: ${used.join(", ")} — удалите ссылки или повторите с force`,
+      );
+    }
     delete screen.elements[input.elementKey];
   } else if (input.moveTo) {
     // Everything piling onto one screen is what a too-broad pattern produces;
