@@ -14,6 +14,7 @@ import { listSuites, readSuite, writeSuite, SuiteRunner, type SuiteFile } from "
 import { MapStore } from "./mapStore.js";
 import { editMap, writeMap, type EditInput, type WriteInput } from "./mapEdit.js";
 import { explore, verify } from "./mapExplore.js";
+import { compareDigest, coverage, digestOf, screenUsage } from "./mapDrift.js";
 import { matchesScreen } from "./mapScreens.js";
 import { toRows } from "./rows.js";
 import { applyCommand, type Command } from "./rowEdit.js";
@@ -364,6 +365,52 @@ export function buildRoutes(deps: RouteDeps): Route[] {
       handler: async (_r, _p, b) => editMap(workspace, body<EditInput>(b)),
     },
 
+    {
+      method: "GET",
+      path: "/map/coverage",
+      handler: async () => {
+        const map = await new MapStore(workspace).load();
+        // Every archived run, because coverage is a question about the whole
+        // suite's history, not about the last thing that ran.
+        return coverage(map, await listRuns(workspace, { limit: 500 }));
+      },
+    },
+    {
+      method: "POST",
+      path: "/map/drift",
+      handler: async (_r, _p, b) => {
+        const { sessionId, screenId, save } = body<{
+          sessionId: string;
+          screenId?: string;
+          /** Take this as the new baseline instead of comparing against it. */
+          save?: boolean;
+        }>(b);
+        const session = sessions.get(sessionId);
+        const store = new MapStore(workspace);
+        const map = await store.load();
+        const url = session.page.url();
+        const screen = screenId
+          ? map.screens.find((s) => s.id === screenId)
+          : map.screens.find((s) => matchesScreen(s, url));
+        if (!screen) throw new AgentError("script", `для ${url} в карте нет экрана`);
+
+        const digest = await digestOf(session.page);
+        if (save || !screen.baseline) {
+          screen.baseline = { runId: "", digest: digest.join("\n"), capturedAt: new Date().toISOString() };
+          await store.saveScreen(screen);
+          return { screen: screen.label, baseline: digest.length, appeared: [], gone: [], usedBy: [] };
+        }
+
+        const changed = compareDigest(screen.baseline.digest.split("\n").filter(Boolean), digest);
+        const usage = screenUsage(await listRuns(workspace, { limit: 500 }));
+        return {
+          screen: screen.label,
+          ...changed,
+          // A change matters in proportion to what walks through it.
+          usedBy: [...(usage.get(screen.label) ?? [])].sort(),
+        };
+      },
+    },
     {
       method: "GET",
       path: "/map/shot",
