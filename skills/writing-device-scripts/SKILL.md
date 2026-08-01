@@ -128,3 +128,33 @@ click({ role: 'link', name: 'Search' })
    The called script runs in the same browser, its steps appear in the report
    under its path, and a second argument overlays variables for that call only
    (`run('scripts/login.js', { USER: '{{ADMIN}}' })`). Cycles are refused.
+
+## Writing a scenario from a description
+
+When someone asks for a scenario in words ("проверь, что нельзя подать
+объявление без цены"), do not start typing steps. Start with the map.
+
+1. **`devices_map_read`.** The map is the vocabulary. Every element you may
+   reference is in it, and a name that is not in it does not exist yet.
+2. **Assemble from names.** `click('Подать объявление')`, not
+   `click({ role: 'button', name: '…' })`. A locator written by hand is a locator
+   nobody will find again when the markup moves.
+3. **Missing an element?** Do not invent a locator. Open the screen in a session
+   and call `devices_map_explore`, then `devices_map_write` for what is worth
+   keeping. Those entries land as proposals for a human to accept — say so.
+4. **`devices_script_validate`** before running. A syntax error or an unknown
+   step is cheaper to find here than in a browser.
+5. **`devices_scenario_propose`.** Put the draft in front of the person, in the
+   panel, unsaved. Do not write a file they have not read.
+6. **Run it.** `devices_run_start`, then `devices_run_report`. A scenario that
+   has never run is a guess.
+7. **Read the failure, fix, repeat** — but stop after a few attempts and say what
+   you could not get past. A scenario bent until it goes green tests nothing.
+
+Hand back the steps *and* the green run. The run is the evidence; without it you
+are asking someone to trust a draft.
+
+**Assertions come from what happened.** After a run, `devices_run_report` lists
+the requests each step caused. `expectApi('POST /api/adverts', 201)` written from
+that is worth more than one written from memory, and it does not depend on
+markup at all.
