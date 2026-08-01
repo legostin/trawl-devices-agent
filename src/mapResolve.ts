@@ -47,6 +47,22 @@ export function findScreen(map: AppMap, label: string): ScreenFile {
 export function resolveName(map: AppMap, reference: string, currentScreenId: string | null): ResolvedEntry {
   const { screen: screenLabel, element } = parseReference(reference);
 
+  // Names are unique within an application, not across every site a workspace
+  // has ever seen: two products both have a "Продолжить", and treating those as
+  // one ambiguous name would make both unusable.
+  const here = currentScreenId ? map.screens.find((s) => s.id === currentScreenId) : undefined;
+  if (here?.domain) {
+    const scoped = map.screens.filter((s) => !s.domain || s.domain === here.domain);
+    if (scoped.length !== map.screens.length) {
+      return resolveWithin({ ...map, screens: scoped }, reference, currentScreenId);
+    }
+  }
+  return resolveWithin(map, reference, currentScreenId);
+}
+
+function resolveWithin(map: AppMap, reference: string, currentScreenId: string | null): ResolvedEntry {
+  const { screen: screenLabel, element } = parseReference(reference);
+
   if (screenLabel) {
     const screen = findScreen(map, screenLabel);
     const hit = lookup(screen, element);

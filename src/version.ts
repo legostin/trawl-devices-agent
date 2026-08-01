@@ -1,4 +1,4 @@
 /** Package version, reported by /health. Kept in step with package.json — see version.test.ts. */
-export const AGENT_VERSION = "0.30.0";
+export const AGENT_VERSION = "0.31.0";
 /** Bumped whenever STEP_NAMES changes, so the plugin can demand an update. */
 export const DSL_VERSION = 5;

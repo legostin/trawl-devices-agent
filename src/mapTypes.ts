@@ -43,6 +43,8 @@ export interface ScreenFile {
   version: 1;
   /** ASCII slug; also the file name. */
   id: string;
+  /** The application this screen belongs to — see mapDomain. */
+  domain?: string;
   label: string;
   /** null on the shared pseudo-screen, which is always in scope. */
   match: ScreenMatch | null;

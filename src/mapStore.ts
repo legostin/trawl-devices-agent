@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { domainOf, domainSlug } from "./mapDomain.js";
 import { EMPTY_APP, SHARED_SCREEN_ID, type AppFile, type AppMap, type ScreenFile } from "./mapTypes.js";
 
 const TRANSLIT: Record<string, string> = {
@@ -42,25 +43,54 @@ export class MapStore {
   /** An absent map is an empty map: the agent works fine without one. */
   async load(): Promise<AppMap> {
     const app = (await readJson<AppFile>(appFile(this.root))) ?? EMPTY_APP;
-    let names: string[] = [];
-    try {
-      names = (await fs.readdir(screensDir(this.root))).filter((n) => n.endsWith(".json"));
-    } catch {
-      return { app, screens: [] };
-    }
     const screens: ScreenFile[] = [];
-    for (const name of names.sort()) {
-      const screen = await readJson<ScreenFile>(path.join(screensDir(this.root), name));
-      if (screen) screens.push(screen);
+
+    // One directory per application. Screens written before this lived in a
+    // single `screens/`, so they are read too and given their domain from the
+    // pattern they already carry — nobody has to migrate anything by hand.
+    for (const dir of await this.screenDirs()) {
+      let names: string[] = [];
+      try {
+        names = (await fs.readdir(dir)).filter((n) => n.endsWith(".json"));
+      } catch {
+        continue;
+      }
+      for (const name of names.sort()) {
+        const screen = await readJson<ScreenFile>(path.join(dir, name));
+        if (screen) screens.push({ ...screen, domain: screen.domain ?? domainOf(screen.match?.url ?? "") });
+      }
     }
+
     // Shared first: name resolution walks the list in order and the shared
     // elements must never be shadowed by an accident of alphabet.
     screens.sort((a, b) => Number(b.id === SHARED_SCREEN_ID) - Number(a.id === SHARED_SCREEN_ID));
     return { app, screens };
   }
 
+  /** Where screens live: the legacy flat directory, plus one per domain. */
+  private async screenDirs(): Promise<string[]> {
+    const dirs = [screensDir(this.root)];
+    try {
+      for (const entry of await fs.readdir(mapDir(this.root), { withFileTypes: true })) {
+        if (entry.isDirectory() && entry.name !== "screens" && entry.name !== "shots" && entry.name !== "flows") {
+          dirs.push(path.join(mapDir(this.root), entry.name));
+        }
+      }
+    } catch {
+      // no map yet
+    }
+    return dirs;
+  }
+
   async saveScreen(screen: ScreenFile): Promise<void> {
-    await writeJson(path.join(screensDir(this.root), `${screen.id}.json`), screen);
+    const domain = screen.domain ?? domainOf(screen.match?.url ?? "");
+    const dir = domain ? path.join(mapDir(this.root), domainSlug(domain)) : screensDir(this.root);
+    await writeJson(path.join(dir, `${screen.id}.json`), { ...screen, domain });
+    // A screen that has moved into its domain must not be left behind in the
+    // flat directory, or it comes back as a duplicate on the next read.
+    if (dir !== screensDir(this.root)) {
+      await fs.rm(path.join(screensDir(this.root), `${screen.id}.json`), { force: true });
+    }
   }
 
   /**
@@ -82,7 +112,9 @@ export class MapStore {
   }
 
   async removeScreen(id: string): Promise<void> {
-    await fs.rm(path.join(screensDir(this.root), `${id}.json`), { force: true });
+    for (const dir of await this.screenDirs()) {
+      await fs.rm(path.join(dir, `${id}.json`), { force: true });
+    }
   }
 
   async saveApp(app: AppFile): Promise<void> {

@@ -31,7 +31,7 @@ it("round-trips a screen through disk", async () => {
     version: 1,
     id: "harakteristiki",
     label: "Характеристики",
-    match: { url: "**/a/new/**", marker: { role: "heading", name: "Характеристики" } },
+    match: { url: "https://auto.example.org/a/new/*", marker: { role: "heading", name: "Характеристики" } },
     elements: {
       god: {
         label: "Год",
@@ -46,10 +46,11 @@ it("round-trips a screen through disk", async () => {
   };
   await store.saveScreen(screen);
 
-  // One file per screen, so two agents editing different screens never collide.
-  const onDisk = JSON.parse(await readFile(path.join(root, "map/screens/harakteristiki.json"), "utf8"));
-  expect(onDisk).toEqual(screen);
-  expect((await store.load()).screens).toEqual([screen]);
+  // One file per screen, under the application it belongs to: two products in
+  // one workspace must not share a namespace.
+  const onDisk = JSON.parse(await readFile(path.join(root, "map/example.org/harakteristiki.json"), "utf8"));
+  expect(onDisk).toEqual({ ...screen, domain: "example.org" });
+  expect((await store.load()).screens).toEqual([{ ...screen, domain: "example.org" }]);
 });
 
 it("keeps the shared pseudo-screen first, so it is always in scope", async () => {
@@ -58,4 +59,26 @@ it("keeps the shared pseudo-screen first, so it is always in scope", async () =>
   await store.saveScreen({ version: 1, id: SHARED_SCREEN_ID, label: "Общие", match: null, elements: {} });
 
   expect((await store.load()).screens.map((s) => s.id)).toEqual([SHARED_SCREEN_ID, "zzz"]);
+});
+
+it("keeps two applications in two namespaces", async () => {
+  const store = new MapStore(root);
+  const of = (id: string, url: string): ScreenFile => ({
+    version: 1,
+    id,
+    label: id,
+    match: { url },
+    elements: {},
+  });
+  await store.saveScreen(of("main", "https://shop.example.org/"));
+  await store.saveScreen(of("main-other", "https://other.test/"));
+
+  // A login on id.example.org belongs with the product on www.example.org —
+  // splitting by host would put a flow's two halves in two maps.
+  await store.saveScreen(of("login", "https://id.example.org/login/"));
+
+  const byDomain = new Map((await store.load()).screens.map((s) => [s.id, s.domain]));
+  expect(byDomain.get("main")).toBe("example.org");
+  expect(byDomain.get("login")).toBe("example.org");
+  expect(byDomain.get("main-other")).toBe("other.test");
 });
